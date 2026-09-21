@@ -1,0 +1,17 @@
+[
+  { "id": "log-001", "employeeName": "Chisomo Banda", "employeeNumber": "EMP001", "device": "Main Entrance", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T07:02:11Z" },
+  { "id": "log-002", "employeeName": "Takondwa Phiri", "employeeNumber": "EMP002", "device": "Server Room", "location": "1st Floor", "status": "GRANTED", "timestamp": "2026-08-06T07:15:44Z" },
+  { "id": "log-003", "employeeName": "Unknown", "employeeNumber": null, "device": "Main Entrance", "location": "Ground Floor", "status": "DENIED", "timestamp": "2026-08-06T07:31:09Z" },
+  { "id": "log-004", "employeeName": "Wongani Mwale", "employeeNumber": "EMP003", "device": "Main Entrance", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T07:45:22Z" },
+  { "id": "log-005", "employeeName": "Chimwemwe Dube", "employeeNumber": "EMP004", "device": "Back Office", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T08:01:55Z" },
+  { "id": "log-006", "employeeName": "Unknown", "employeeNumber": null, "device": "Server Room", "location": "1st Floor", "status": "DENIED", "timestamp": "2026-08-06T08:14:30Z" },
+  { "id": "log-007", "employeeName": "Mphatso Tembo", "employeeNumber": "EMP005", "device": "Main Entrance", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T08:22:17Z" },
+  { "id": "log-008", "employeeName": "Alinafe Kachule", "employeeNumber": "EMP006", "device": "Back Office", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T08:35:40Z" },
+  { "id": "log-009", "employeeName": "Unknown", "employeeNumber": null, "device": "Back Office", "location": "Ground Floor", "status": "DENIED", "timestamp": "2026-08-06T09:05:13Z" },
+  { "id": "log-010", "employeeName": "Thandizo Lungu", "employeeNumber": "EMP007", "device": "Main Entrance", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T09:18:02Z" },
+  { "id": "log-011", "employeeName": "Chisomo Banda", "employeeNumber": "EMP001", "device": "Server Room", "location": "1st Floor", "status": "GRANTED", "timestamp": "2026-08-06T09:44:29Z" },
+  { "id": "log-012", "employeeName": "Kondwani Nkosi", "employeeNumber": "EMP008", "device": "Main Entrance", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T10:02:50Z" },
+  { "id": "log-013", "employeeName": "Unknown", "employeeNumber": null, "device": "Main Entrance", "location": "Ground Floor", "status": "DENIED", "timestamp": "2026-08-06T10:30:00Z" },
+  { "id": "log-014", "employeeName": "Wongani Mwale", "employeeNumber": "EMP003", "device": "Back Office", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T10:55:18Z" },
+  { "id": "log-015", "employeeName": "Takondwa Phiri", "employeeNumber": "EMP002", "device": "Main Entrance", "location": "Ground Floor", "status": "GRANTED", "timestamp": "2026-08-06T11:10:33Z" }
+]
