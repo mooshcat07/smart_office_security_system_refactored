@@ -28,3 +28,19 @@ export const getPendingCommand = query({
     };
   },
 });
+
+export const listByDevice = query({
+  args: {
+    deviceId: v.id("devices"),
+  },
+
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("deviceCommands")
+      .withIndex("by_device_status", (q) =>
+        q.eq("deviceId", args.deviceId)
+      )
+      .order("desc")
+      .take(20);
+  },
+});

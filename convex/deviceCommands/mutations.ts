@@ -255,3 +255,90 @@ export const startFingerprintDeletion = mutation({
     };
   },
 });
+
+export const triggerBuzzer = mutation({
+  args: {
+    deviceId: v.id("devices"),
+    durationMs: v.number(),
+  },
+
+  handler: async (ctx, args) => {
+    const device = await ctx.db.get(args.deviceId);
+
+    if (!device) {
+      throw new Error("Device not found");
+    }
+
+    const pendingCommand = await ctx.db
+      .query("deviceCommands")
+      .withIndex("by_device_status", (q) =>
+        q
+          .eq("deviceId", args.deviceId)
+          .eq("status", "PENDING")
+      )
+      .first();
+
+    if (pendingCommand) {
+      throw new Error(
+        "This device already has a pending command"
+      );
+    }
+
+    const commandId = await ctx.db.insert("deviceCommands", {
+      deviceId: device._id,
+      esp32Id: device.esp32Id,
+      command: "TRIGGER_BUZZER",
+      durationMs: args.durationMs,
+      status: "PENDING",
+      createdAt: Date.now(),
+    });
+
+    return {
+      success: true,
+      commandId,
+    };
+  },
+});
+
+export const silenceBuzzer = mutation({
+  args: {
+    deviceId: v.id("devices"),
+  },
+
+  handler: async (ctx, args) => {
+    const device = await ctx.db.get(args.deviceId);
+
+    if (!device) {
+      throw new Error("Device not found");
+    }
+
+    const pendingCommand = await ctx.db
+      .query("deviceCommands")
+      .withIndex("by_device_status", (q) =>
+        q
+          .eq("deviceId", args.deviceId)
+          .eq("status", "PENDING")
+      )
+      .first();
+
+    if (pendingCommand) {
+      throw new Error(
+        "This device already has a pending command"
+      );
+    }
+
+    const commandId = await ctx.db.insert("deviceCommands", {
+      deviceId: device._id,
+      esp32Id: device.esp32Id,
+      command: "SILENCE_BUZZER",
+      status: "PENDING",
+      createdAt: Date.now(),
+    });
+
+    return {
+      success: true,
+      commandId,
+    };
+  },
+});
+

@@ -26,3 +26,55 @@ export const getNextFingerprintId = query({
     );
   },
 });
+
+export const getRegisteredUsers = query({
+  args: {},
+
+  handler: async (ctx) => {
+    const users = await ctx.db
+      .query("fingerprintUsers")
+      .collect();
+
+    const accessLogs = await ctx.db
+      .query("accessLogs")
+      .order("desc")
+      .collect();
+
+    return users.map((user) => {
+      const lastAccess = accessLogs.find(
+        (log) =>
+          log.status === "GRANTED" &&
+          log.fingerprintId === user.fingerprintId
+      );
+
+      return {
+        id: user._id,
+        name: user.fullName,
+        employeeNumber: user.employeeNumber,
+
+        role: (user.role ?? "STAFF") as
+          | "ADMIN"
+          | "STAFF"
+          | "SECURITY",
+
+        department: user.department ?? "Not assigned",
+
+        status: user.active
+          ? ("ACTIVE" as const)
+          : ("INACTIVE" as const),
+
+        fingerprintRegistered: true,
+
+        registeredAt: new Date(
+          user._creationTime
+        ).toISOString(),
+
+        lastAccess: lastAccess
+          ? new Date(
+              lastAccess._creationTime
+            ).toISOString()
+          : null,
+      };
+    });
+  },
+});

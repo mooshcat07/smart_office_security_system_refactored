@@ -62,6 +62,14 @@ bool fingerprintConnected = false;
 uint16_t fingerprintTemplateCount = 0;
 
 // =====================================================
+// Buzzer state
+// =====================================================
+
+bool buzzerActive = false;
+
+unsigned long buzzerStopTime = 0;
+
+// =====================================================
 // Command state
 // =====================================================
 
@@ -97,6 +105,82 @@ void connectWiFi() {
 
   Serial.print("ESP32 IP: ");
   Serial.println(WiFi.localIP());
+}
+
+// =====================================================
+// Buzzer control
+// =====================================================
+
+void triggerBuzzer(unsigned long durationMs) {
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("BUZZER TRIGGERED");
+  Serial.println("================================");
+
+  Serial.print("Duration: ");
+  Serial.print(durationMs);
+  Serial.println(" ms");
+
+  digitalWrite(
+    BUZZER_PIN,
+    HIGH
+  );
+
+  buzzerActive = true;
+
+  buzzerStopTime =
+    millis() + durationMs;
+}
+
+// -----------------------------------------------------
+// Silence buzzer
+// -----------------------------------------------------
+
+void silenceBuzzer() {
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("BUZZER SILENCED");
+  Serial.println("================================");
+
+  digitalWrite(
+    BUZZER_PIN,
+    LOW
+  );
+
+  buzzerActive = false;
+
+  buzzerStopTime = 0;
+}
+
+// -----------------------------------------------------
+// Automatically stop timed buzzer
+// -----------------------------------------------------
+
+void updateBuzzer() {
+
+  if (!buzzerActive) {
+    return;
+  }
+
+  if (
+    millis() >= buzzerStopTime
+  ) {
+
+    digitalWrite(
+      BUZZER_PIN,
+      LOW
+    );
+
+    buzzerActive = false;
+
+    buzzerStopTime = 0;
+
+    Serial.println(
+      "Buzzer duration completed."
+    );
+  }
 }
 
 // =====================================================
@@ -174,9 +258,6 @@ void sendDeviceStatus() {
     "Content-Type",
     "application/json"
   );
-
-  bool buzzerActive =
-    digitalRead(BUZZER_PIN);
 
   bool ledActive =
     digitalRead(LED_PIN);
@@ -799,7 +880,10 @@ void checkForCommands() {
     doc["command"]["commandId"];
 
   int fingerprintId =
-    doc["command"]["fingerprintId"];
+    doc["command"]["fingerprintId"] | 0;
+
+  unsigned long durationMs =
+    doc["command"]["durationMs"] | 2000;
 
   Serial.println();
 
@@ -835,11 +919,78 @@ void checkForCommands() {
     fingerprintId
   );
 
+  Serial.print(
+    "Duration: "
+  );
+
+  Serial.print(
+    durationMs
+  );
+
+  Serial.println(
+    " ms"
+  );
+
+  // ===================================================
+  // TRIGGER BUZZER
+  // ===================================================
+
+  if (
+    strcmp(
+      command,
+      "TRIGGER_BUZZER"
+    ) == 0
+  ) {
+
+    if (durationMs == 0) {
+
+      durationMs = 2000;
+    }
+
+    triggerBuzzer(
+      durationMs
+    );
+
+    sendCommandResult(
+      commandId,
+      true
+    );
+
+    // Update server with buzzer state
+    sendDeviceStatus();
+
+    return;
+  }
+
+  // ===================================================
+  // SILENCE BUZZER
+  // ===================================================
+
+  else if (
+    strcmp(
+      command,
+      "SILENCE_BUZZER"
+    ) == 0
+  ) {
+
+    silenceBuzzer();
+
+    sendCommandResult(
+      commandId,
+      true
+    );
+
+    // Update server with buzzer state
+    sendDeviceStatus();
+
+    return;
+  }
+
   // ===================================================
   // ENROLL FINGERPRINT
   // ===================================================
 
-  if (
+  else if (
     strcmp(
       command,
       "ENROLL_FINGERPRINT"
@@ -1147,18 +1298,7 @@ void scanFingerprint() {
     );
 
     // Turn buzzer ON
-    digitalWrite(
-      BUZZER_PIN,
-      HIGH
-    );
-
-    delay(1000);
-
-    // Turn buzzer OFF
-    digitalWrite(
-      BUZZER_PIN,
-      LOW
-    );
+    triggerBuzzer(1000);
   }
 
   // ---------------------------------------------------
@@ -1265,6 +1405,12 @@ void setup() {
 // =====================================================
 
 void loop() {
+
+  // ---------------------------------------------------
+  // Update buzzer
+  // ---------------------------------------------------
+
+  updateBuzzer();
 
   // ---------------------------------------------------
   // Check commands every 3 seconds

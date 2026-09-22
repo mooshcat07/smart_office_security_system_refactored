@@ -8,7 +8,7 @@ import { BuzzerControl } from "@/components/buzzer-control"
 import { WifiIcon, WifiOff } from "lucide-react"
 
 export default function DevicesPage() {
-  const devices = useQuery(api.devices.list)
+  const devices = useQuery(api.devices.queries.list);
 
   if (!devices) {
     return (

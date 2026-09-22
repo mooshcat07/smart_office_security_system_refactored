@@ -9,6 +9,7 @@
  */
 
 import type * as accessLogs_mutations from "../accessLogs/mutations.js";
+import type * as accessLogs_queries from "../accessLogs/queries.js";
 import type * as dashboard_queries from "../dashboard/queries.js";
 import type * as deviceCommands_mutations from "../deviceCommands/mutations.js";
 import type * as deviceCommands_queries from "../deviceCommands/queries.js";
@@ -25,6 +26,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "accessLogs/mutations": typeof accessLogs_mutations;
+  "accessLogs/queries": typeof accessLogs_queries;
   "dashboard/queries": typeof dashboard_queries;
   "deviceCommands/mutations": typeof deviceCommands_mutations;
   "deviceCommands/queries": typeof deviceCommands_queries;
