@@ -8,14 +8,14 @@
  * @module
  */
 
-import type * as Crons from "../Crons.js";
-import type * as Http from "../Http.js";
-import type * as accessLogs from "../accessLogs.js";
-import type * as alarmEvents from "../alarmEvents.js";
-import type * as deviceCommands from "../deviceCommands.js";
-import type * as devices from "../devices.js";
-import type * as fingerprintUsers from "../fingerprintUsers.js";
-import type * as motionsevents from "../motionsevents.js";
+import type * as accessLogs_mutations from "../accessLogs/mutations.js";
+import type * as dashboard_queries from "../dashboard/queries.js";
+import type * as deviceCommands_mutations from "../deviceCommands/mutations.js";
+import type * as deviceCommands_queries from "../deviceCommands/queries.js";
+import type * as devices_mutation from "../devices/mutation.js";
+import type * as devices_queries from "../devices/queries.js";
+import type * as fingerprintUsers_mutation from "../fingerprintUsers/mutation.js";
+import type * as fingerprintUsers_queries from "../fingerprintUsers/queries.js";
 
 import type {
   ApiFromModules,
@@ -24,14 +24,14 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  Crons: typeof Crons;
-  Http: typeof Http;
-  accessLogs: typeof accessLogs;
-  alarmEvents: typeof alarmEvents;
-  deviceCommands: typeof deviceCommands;
-  devices: typeof devices;
-  fingerprintUsers: typeof fingerprintUsers;
-  motionsevents: typeof motionsevents;
+  "accessLogs/mutations": typeof accessLogs_mutations;
+  "dashboard/queries": typeof dashboard_queries;
+  "deviceCommands/mutations": typeof deviceCommands_mutations;
+  "deviceCommands/queries": typeof deviceCommands_queries;
+  "devices/mutation": typeof devices_mutation;
+  "devices/queries": typeof devices_queries;
+  "fingerprintUsers/mutation": typeof fingerprintUsers_mutation;
+  "fingerprintUsers/queries": typeof fingerprintUsers_queries;
 }>;
 
 /**
