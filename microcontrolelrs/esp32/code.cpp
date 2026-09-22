@@ -11,9 +11,6 @@
 const char* WIFI_SSID = "Grimm";
 const char* WIFI_PASSWORD = "MooshMoosh07";
 
-const char* DOMAIN =
-    "http://10.163.55.232:3000/api";
-
 // =====================================================
 // Next.js API
 // =====================================================
@@ -44,7 +41,7 @@ const char* FIRMWARE_VERSION = "1.0.0";
 #define LED_PIN 4
 #define BUZZER_PIN 21
 
-// AS608
+// AS608 fingerprint sensor
 #define FINGER_RX 16
 #define FINGER_TX 17
 
@@ -54,7 +51,7 @@ Adafruit_Fingerprint finger =
     Adafruit_Fingerprint(&fingerSerial);
 
 // =====================================================
-// Device component status
+// Fingerprint sensor state
 // =====================================================
 
 bool fingerprintConnected = false;
@@ -80,12 +77,21 @@ const unsigned long COMMAND_INTERVAL = 3000;
 bool enrollmentRunning = false;
 
 // =====================================================
-// Wi-Fi
+// Heartbeat
+// =====================================================
+
+unsigned long lastStatusTime = 0;
+
+const unsigned long STATUS_INTERVAL = 30000;
+
+// =====================================================
+// Connect to Wi-Fi
 // =====================================================
 
 void connectWiFi() {
 
-  Serial.print("Connecting to Wi-Fi");
+  Serial.println();
+  Serial.println("Connecting to Wi-Fi...");
 
   WiFi.begin(
     WIFI_SSID,
@@ -100,7 +106,6 @@ void connectWiFi() {
   }
 
   Serial.println();
-
   Serial.println("Wi-Fi connected!");
 
   Serial.print("ESP32 IP: ");
@@ -108,7 +113,7 @@ void connectWiFi() {
 }
 
 // =====================================================
-// Buzzer control
+// Buzzer
 // =====================================================
 
 void triggerBuzzer(unsigned long durationMs) {
@@ -155,7 +160,7 @@ void silenceBuzzer() {
 }
 
 // -----------------------------------------------------
-// Automatically stop timed buzzer
+// Update timed buzzer
 // -----------------------------------------------------
 
 void updateBuzzer() {
@@ -164,9 +169,7 @@ void updateBuzzer() {
     return;
   }
 
-  if (
-    millis() >= buzzerStopTime
-  ) {
+  if (millis() >= buzzerStopTime) {
 
     digitalWrite(
       BUZZER_PIN,
@@ -184,7 +187,7 @@ void updateBuzzer() {
 }
 
 // =====================================================
-// Check AS608
+// Check fingerprint sensor
 // =====================================================
 
 void checkFingerprintSensor() {
@@ -236,7 +239,28 @@ void checkFingerprintSensor() {
 }
 
 // =====================================================
-// Send device status
+// Send device heartbeat/status
+// =====================================================
+//
+// IMPORTANT:
+//
+// The ESP32 does NOT send:
+//   - status
+//   - lastSeen
+//
+// The Next.js API updates lastSeen automatically
+// whenever this request is received.
+//
+// Heartbeat is sent every 30 seconds.
+//
+// Server logic:
+//
+// Date.now() - lastSeen < 60000
+//     => ONLINE
+//
+// Date.now() - lastSeen >= 60000
+//     => OFFLINE
+//
 // =====================================================
 
 void sendDeviceStatus() {
@@ -244,7 +268,7 @@ void sendDeviceStatus() {
   if (WiFi.status() != WL_CONNECTED) {
 
     Serial.println(
-      "Wi-Fi disconnected."
+      "Wi-Fi disconnected. Heartbeat not sent."
     );
 
     return;
@@ -259,9 +283,11 @@ void sendDeviceStatus() {
     "application/json"
   );
 
+  // Read current hardware state
   bool ledActive =
     digitalRead(LED_PIN);
 
+  // Build JSON
   String json = "{";
 
   json += "\"esp32Id\":\"";
@@ -299,9 +325,9 @@ void sendDeviceStatus() {
   json += "}";
 
   Serial.println();
-  Serial.println(
-    "Sending device status:"
-  );
+  Serial.println("================================");
+  Serial.println("SENDING DEVICE HEARTBEAT");
+  Serial.println("================================");
 
   Serial.println(json);
 
@@ -312,7 +338,9 @@ void sendDeviceStatus() {
     "HTTP response code: "
   );
 
-  Serial.println(responseCode);
+  Serial.println(
+    responseCode
+  );
 
   String response =
     http.getString();
@@ -338,7 +366,11 @@ void sendFingerprintEvent(
   if (WiFi.status() != WL_CONNECTED) {
 
     Serial.println(
-      "Wi-Fi disconnected. Fingerprint event not sent."
+      "Wi-Fi disconnected."
+    );
+
+    Serial.println(
+      "Fingerprint event not sent."
     );
 
     return;
@@ -371,9 +403,9 @@ void sendFingerprintEvent(
   json += "}";
 
   Serial.println();
-  Serial.println(
-    "Sending fingerprint event:"
-  );
+  Serial.println("================================");
+  Serial.println("SENDING FINGERPRINT EVENT");
+  Serial.println("================================");
 
   Serial.println(json);
 
@@ -384,7 +416,9 @@ void sendFingerprintEvent(
     "Fingerprint API response: "
   );
 
-  Serial.println(responseCode);
+  Serial.println(
+    responseCode
+  );
 
   String response =
     http.getString();
@@ -399,7 +433,7 @@ void sendFingerprintEvent(
 }
 
 // =====================================================
-// Enroll fingerprint on AS608
+// Enroll fingerprint
 // =====================================================
 
 bool enrollFingerprint(
@@ -407,17 +441,9 @@ bool enrollFingerprint(
 ) {
 
   Serial.println();
-  Serial.println(
-    "================================"
-  );
-
-  Serial.println(
-    "FINGERPRINT ENROLLMENT"
-  );
-
-  Serial.println(
-    "================================"
-  );
+  Serial.println("================================");
+  Serial.println("FINGERPRINT ENROLLMENT");
+  Serial.println("================================");
 
   Serial.print(
     "Fingerprint ID: "
@@ -428,11 +454,10 @@ bool enrollFingerprint(
   );
 
   // ---------------------------------------------------
-  // First finger scan
+  // First scan
   // ---------------------------------------------------
 
   Serial.println();
-
   Serial.println(
     "Place finger on sensor..."
   );
@@ -492,7 +517,6 @@ bool enrollFingerprint(
   // ---------------------------------------------------
 
   Serial.println();
-
   Serial.println(
     "Remove finger..."
   );
@@ -512,11 +536,10 @@ bool enrollFingerprint(
   );
 
   // ---------------------------------------------------
-  // Second finger scan
+  // Second scan
   // ---------------------------------------------------
 
   Serial.println();
-
   Serial.println(
     "Place the SAME finger again..."
   );
@@ -572,11 +595,10 @@ bool enrollFingerprint(
   );
 
   // ---------------------------------------------------
-  // Create fingerprint model
+  // Create model
   // ---------------------------------------------------
 
   Serial.println();
-
   Serial.println(
     "Creating fingerprint model..."
   );
@@ -598,7 +620,7 @@ bool enrollFingerprint(
   );
 
   // ---------------------------------------------------
-  // Store fingerprint
+  // Store model
   // ---------------------------------------------------
 
   Serial.print(
@@ -624,7 +646,6 @@ bool enrollFingerprint(
   }
 
   Serial.println();
-
   Serial.println(
     "Fingerprint stored successfully!"
   );
@@ -633,7 +654,7 @@ bool enrollFingerprint(
 }
 
 // =====================================================
-// Delete fingerprint from AS608
+// Delete fingerprint
 // =====================================================
 
 bool deleteFingerprint(
@@ -641,18 +662,9 @@ bool deleteFingerprint(
 ) {
 
   Serial.println();
-
-  Serial.println(
-    "================================"
-  );
-
-  Serial.println(
-    "FINGERPRINT DELETION"
-  );
-
-  Serial.println(
-    "================================"
-  );
+  Serial.println("================================");
+  Serial.println("FINGERPRINT DELETION");
+  Serial.println("================================");
 
   Serial.print(
     "Deleting fingerprint ID: "
@@ -684,7 +696,9 @@ bool deleteFingerprint(
     " Error code: "
   );
 
-  Serial.println(result);
+  Serial.println(
+    result
+  );
 
   return false;
 }
@@ -702,7 +716,11 @@ void sendCommandResult(
   if (WiFi.status() != WL_CONNECTED) {
 
     Serial.println(
-      "Wi-Fi disconnected. Command result not sent."
+      "Wi-Fi disconnected."
+    );
+
+    Serial.println(
+      "Command result not sent."
     );
 
     return;
@@ -745,10 +763,9 @@ void sendCommandResult(
   json += "}";
 
   Serial.println();
-
-  Serial.println(
-    "Sending command result:"
-  );
+  Serial.println("================================");
+  Serial.println("SENDING COMMAND RESULT");
+  Serial.println("================================");
 
   Serial.println(json);
 
@@ -759,7 +776,9 @@ void sendCommandResult(
     "Command result response: "
   );
 
-  Serial.println(responseCode);
+  Serial.println(
+    responseCode
+  );
 
   String response =
     http.getString();
@@ -779,15 +798,15 @@ void sendCommandResult(
 
 void checkForCommands() {
 
+  // Don't process commands while enrolling
   if (enrollmentRunning) {
-
     return;
   }
 
+  // Need Wi-Fi
   if (
     WiFi.status() != WL_CONNECTED
   ) {
-
     return;
   }
 
@@ -810,10 +829,6 @@ void checkForCommands() {
 
   if (responseCode != 200) {
 
-    Serial.println(
-      "Could not fetch device command."
-    );
-
     http.end();
 
     return;
@@ -821,14 +836,6 @@ void checkForCommands() {
 
   String response =
     http.getString();
-
-  Serial.println();
-
-  Serial.println(
-    "Command server response:"
-  );
-
-  Serial.println(response);
 
   http.end();
 
@@ -858,7 +865,7 @@ void checkForCommands() {
   }
 
   // ---------------------------------------------------
-  // Check whether command exists
+  // Check command
   // ---------------------------------------------------
 
   if (
@@ -886,50 +893,22 @@ void checkForCommands() {
     doc["command"]["durationMs"] | 2000;
 
   Serial.println();
+  Serial.println("================================");
+  Serial.println("PENDING DEVICE COMMAND");
+  Serial.println("================================");
 
-  Serial.println(
-    "================================"
-  );
-
-  Serial.println(
-    "PENDING DEVICE COMMAND"
-  );
-
-  Serial.println(
-    "================================"
-  );
-
-  Serial.print(
-    "Command: "
-  );
-
+  Serial.print("Command: ");
   Serial.println(command);
 
-  Serial.print(
-    "Command ID: "
-  );
-
+  Serial.print("Command ID: ");
   Serial.println(commandId);
 
-  Serial.print(
-    "Fingerprint ID: "
-  );
+  Serial.print("Fingerprint ID: ");
+  Serial.println(fingerprintId);
 
-  Serial.println(
-    fingerprintId
-  );
-
-  Serial.print(
-    "Duration: "
-  );
-
-  Serial.print(
-    durationMs
-  );
-
-  Serial.println(
-    " ms"
-  );
+  Serial.print("Duration: ");
+  Serial.print(durationMs);
+  Serial.println(" ms");
 
   // ===================================================
   // TRIGGER BUZZER
@@ -943,7 +922,6 @@ void checkForCommands() {
   ) {
 
     if (durationMs == 0) {
-
       durationMs = 2000;
     }
 
@@ -956,7 +934,7 @@ void checkForCommands() {
       true
     );
 
-    // Update server with buzzer state
+    // This also updates lastSeen
     sendDeviceStatus();
 
     return;
@@ -980,7 +958,7 @@ void checkForCommands() {
       true
     );
 
-    // Update server with buzzer state
+    // This also updates lastSeen
     sendDeviceStatus();
 
     return;
@@ -1027,7 +1005,6 @@ void checkForCommands() {
     if (enrolled) {
 
       Serial.println();
-
       Serial.println(
         "Enrollment completed successfully."
       );
@@ -1048,13 +1025,12 @@ void checkForCommands() {
         true
       );
 
-      // Update device status
+      // Update server heartbeat
       sendDeviceStatus();
 
     } else {
 
       Serial.println();
-
       Serial.println(
         "Enrollment failed."
       );
@@ -1116,24 +1092,21 @@ void checkForCommands() {
       }
 
       Serial.println();
-
       Serial.println(
         "Deletion completed successfully."
       );
 
-      // Tell server deletion succeeded
       sendCommandResult(
         commandId,
         true
       );
 
-      // Update device status
+      // Update server heartbeat
       sendDeviceStatus();
 
     } else {
 
       Serial.println();
-
       Serial.println(
         "Fingerprint deletion failed."
       );
@@ -1171,28 +1144,24 @@ void scanFingerprint() {
 
   // Don't scan while enrollment is happening
   if (enrollmentRunning) {
-
     return;
   }
 
+  // Don't scan if sensor isn't connected
   if (!fingerprintConnected) {
-
     return;
   }
 
-  uint8_t result;
-
   // ---------------------------------------------------
-  // Wait for finger
+  // Capture image
   // ---------------------------------------------------
 
-  result =
+  uint8_t result =
     finger.getImage();
 
   if (
     result == FINGERPRINT_NOFINGER
   ) {
-
     return;
   }
 
@@ -1207,6 +1176,7 @@ void scanFingerprint() {
     return;
   }
 
+  Serial.println();
   Serial.println(
     "Fingerprint image captured."
   );
@@ -1235,7 +1205,7 @@ void scanFingerprint() {
   }
 
   // ---------------------------------------------------
-  // Search stored fingerprints
+  // Search database
   // ---------------------------------------------------
 
   result =
@@ -1265,13 +1235,16 @@ void scanFingerprint() {
       finger.confidence
     );
 
-    // Send GRANTED event
+    // -------------------------------------------------
+    // GRANTED
+    // -------------------------------------------------
+
     sendFingerprintEvent(
       finger.fingerID,
       "GRANTED"
     );
 
-    // Turn LED ON
+    // Turn LED on
     digitalWrite(
       LED_PIN,
       HIGH
@@ -1279,7 +1252,7 @@ void scanFingerprint() {
 
     delay(2000);
 
-    // Turn LED OFF
+    // Turn LED off
     digitalWrite(
       LED_PIN,
       LOW
@@ -1287,22 +1260,27 @@ void scanFingerprint() {
 
   } else {
 
+    // -------------------------------------------------
+    // DENIED
+    // -------------------------------------------------
+
     Serial.println(
       "Fingerprint NOT recognized."
     );
 
-    // Send DENIED event
     sendFingerprintEvent(
       0,
       "DENIED"
     );
 
-    // Turn buzzer ON
-    triggerBuzzer(1000);
+    // Activate buzzer
+    triggerBuzzer(
+      1000
+    );
   }
 
   // ---------------------------------------------------
-  // Wait until finger is removed
+  // Wait for finger removal
   // ---------------------------------------------------
 
   while (
@@ -1320,13 +1298,15 @@ void scanFingerprint() {
 
 void setup() {
 
-  Serial.begin(115200);
+  Serial.begin(
+    115200
+  );
 
   delay(1000);
 
-  // ---------------------------------------------------
+  // ===================================================
   // LED
-  // ---------------------------------------------------
+  // ===================================================
 
   pinMode(
     LED_PIN,
@@ -1338,9 +1318,9 @@ void setup() {
     LOW
   );
 
-  // ---------------------------------------------------
+  // ===================================================
   // Buzzer
-  // ---------------------------------------------------
+  // ===================================================
 
   pinMode(
     BUZZER_PIN,
@@ -1352,9 +1332,9 @@ void setup() {
     LOW
   );
 
-  // ---------------------------------------------------
-  // AS608 Serial
-  // ---------------------------------------------------
+  // ===================================================
+  // AS608
+  // ===================================================
 
   fingerSerial.begin(
     57600,
@@ -1363,41 +1343,47 @@ void setup() {
     FINGER_TX
   );
 
-  // ---------------------------------------------------
+  // ===================================================
   // Startup message
-  // ---------------------------------------------------
+  // ===================================================
 
   Serial.println();
+  Serial.println("==============================");
+  Serial.println(" Smart Office Security System");
+  Serial.println("==============================");
 
-  Serial.println(
-    "=============================="
-  );
+  Serial.print("ESP32 ID: ");
+  Serial.println(ESP32_ID);
 
-  Serial.println(
-    " Smart Office Security System"
-  );
+  Serial.print("Firmware: ");
+  Serial.println(FIRMWARE_VERSION);
 
-  Serial.println(
-    "=============================="
-  );
-
-  // ---------------------------------------------------
+  // ===================================================
   // Wi-Fi
-  // ---------------------------------------------------
+  // ===================================================
 
   connectWiFi();
 
-  // ---------------------------------------------------
+  // ===================================================
   // Fingerprint sensor
-  // ---------------------------------------------------
+  // ===================================================
 
   checkFingerprintSensor();
 
-  // ---------------------------------------------------
-  // Initial device status
-  // ---------------------------------------------------
+  // ===================================================
+  // Initial heartbeat
+  // ===================================================
+  //
+  // This creates/updates lastSeen on the server.
+  //
+  // The ESP32 does NOT send status or lastSeen.
+  //
+  // ===================================================
 
   sendDeviceStatus();
+
+  lastStatusTime =
+    millis();
 }
 
 // =====================================================
@@ -1406,15 +1392,15 @@ void setup() {
 
 void loop() {
 
-  // ---------------------------------------------------
+  // ===================================================
   // Update buzzer
-  // ---------------------------------------------------
+  // ===================================================
 
   updateBuzzer();
 
-  // ---------------------------------------------------
-  // Check commands every 3 seconds
-  // ---------------------------------------------------
+  // ===================================================
+  // Check pending commands every 3 seconds
+  // ===================================================
 
   if (
     millis() - lastCommandCheck
@@ -1427,30 +1413,34 @@ void loop() {
     checkForCommands();
   }
 
-  // ---------------------------------------------------
-  // Continuously scan fingerprints
-  // ---------------------------------------------------
+  // ===================================================
+  // Scan fingerprint
+  // ===================================================
 
   scanFingerprint();
 
-  // ---------------------------------------------------
+  // ===================================================
   // Heartbeat every 30 seconds
-  // ---------------------------------------------------
-
-  static unsigned long lastStatusTime = 0;
+  // ===================================================
+  //
+  // Every 30 seconds:
+  //
+  // 1. Check AS608
+  // 2. Send current hardware information
+  // 3. Server updates lastSeen
+  //
+  // ===================================================
 
   if (
     millis() - lastStatusTime
-    >= 30000
+    >= STATUS_INTERVAL
   ) {
 
     lastStatusTime =
       millis();
 
-    // Check AS608
     checkFingerprintSensor();
 
-    // Tell Next.js we're still online
     sendDeviceStatus();
   }
 

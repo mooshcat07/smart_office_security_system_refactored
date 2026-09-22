@@ -34,8 +34,6 @@ export const registerDevice = mutation({
       name: args.name,
       location: args.location,
 
-      status: "OFFLINE",
-
       lastSeen: Date.now(),
 
       firmware: args.firmware,
@@ -79,8 +77,6 @@ export const updateDeviceStatus = mutation({
 
     // Update device and component status
     await ctx.db.patch(device._id, {
-      status: "ONLINE",
-
       lastSeen: Date.now(),
 
       ...(args.firmware !== undefined && {

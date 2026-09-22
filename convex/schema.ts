@@ -7,7 +7,6 @@ export default defineSchema({
     esp32Id: v.string(),
     name: v.string(),
     location: v.string(),
-    status: v.union(v.literal("ONLINE"), v.literal("OFFLINE")),
     lastSeen: v.number(), // Date.now() timestamp
     firmware: v.optional(v.string()),
     fingerprintConnected: v.boolean(),

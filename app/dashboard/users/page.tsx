@@ -19,6 +19,7 @@ import { flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel
 import { useQuery } from "convex/react"
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
 import React from "react"
+import { RegisterEmployeeDialog } from "@/components/register-employee-dialog"
 
 type UserRole = "ADMIN" | "STAFF" | "SECURITY"
 type UserStatus = "ACTIVE" | "INACTIVE"
@@ -217,6 +218,7 @@ export default function UsersPage() {
   const [roleFilter, setRole] = React.useState("ALL")
   const [statusFilter, setStatus] = React.useState("ALL")
   const [search, setSearch] = React.useState("")
+  const [registerOpen, setRegisterOpen] = React.useState(false)
 
   const users = useQuery(
     api.fingerprintUsers.queries.getRegisteredUsers
@@ -349,7 +351,11 @@ export default function UsersPage() {
             </CardDescription>
           </div>
 
-          <Button size="sm" className="h-8">
+          <Button
+            size="sm"
+            className="h-8"
+            onClick={() => setRegisterOpen(true)}
+          >
             <PlusIcon className="size-3.5 mr-1" />
             Add Employee
           </Button>
@@ -530,6 +536,11 @@ export default function UsersPage() {
 
         </CardContent>
       </Card>
+
+      <RegisterEmployeeDialog
+        open={registerOpen}
+        onOpenChange={setRegisterOpen}
+      />
     </div>
   )
 }
