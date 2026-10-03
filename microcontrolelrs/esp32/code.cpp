@@ -8,24 +8,24 @@
 // Wi-Fi
 // =====================================================
 
-const char* WIFI_SSID = "Grimm"; // Use MUBAS Wifi Name
-const char* WIFI_PASSWORD = "MooshMoosh07"; // Use MUBAS Wifi Password
+const char* WIFI_SSID = "Grimm";
+const char* WIFI_PASSWORD = "MooshMoosh07";
 
 // =====================================================
 // Next.js API
 // =====================================================
 
 const char* STATUS_API =
-    "http://10.48.0.232:3000/api/devices/status";
+    "http://10.235.241.232:3000/api/devices/status";
 
 const char* FINGERPRINT_API =
-    "http://10.48.0.232:3000/api/devices/fingerprint";
+    "http://10.235.241.232:3000/api/devices/fingerprint";
 
 const char* COMMAND_API =
-    "http://10.48.0.232:3000/api/devices/commands?esp32Id=ESP32-001";
+    "http://10.235.241.232:3000/api/devices/commands?esp32Id=ESP32-001";
 
 const char* COMMAND_RESULT_API =
-    "http://10.48.0.232:3000/api/devices/commands/result";
+    "http://10.235.241.232:3000/api/devices/commands/result";
 
 // =====================================================
 // Device

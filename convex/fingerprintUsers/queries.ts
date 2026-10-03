@@ -49,6 +49,7 @@ export const getRegisteredUsers = query({
 
       return {
         id: user._id,
+        fingerprintId: user.fingerprintId,
         name: user.fullName,
         employeeNumber: user.employeeNumber,
 
@@ -58,6 +59,9 @@ export const getRegisteredUsers = query({
           | "SECURITY",
 
         department: user.department ?? "Not assigned",
+        // Raw value (undefined when unset) for edit forms, so we
+        // don't accidentally save the literal "Not assigned" text.
+        rawDepartment: user.department ?? "",
 
         status: user.active
           ? ("ACTIVE" as const)
