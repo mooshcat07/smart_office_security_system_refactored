@@ -119,3 +119,54 @@ export const startFingerprintEnrollment = mutation({
     };
   },
 });
+
+// =====================================================
+// Update staff data (name, number, department, role, active)
+//
+// Pure data edit — no ESP32 round trip needed, since the
+// fingerprint template on the sensor is untouched.
+// =====================================================
+
+export const updateFingerprintUser = mutation({
+  args: {
+    id: v.id("fingerprintUsers"),
+    fullName: v.string(),
+    employeeNumber: v.string(),
+    department: v.optional(v.string()),
+    role: v.optional(v.string()),
+    active: v.boolean(),
+  },
+
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.id);
+
+    if (!user) {
+      throw new Error("Staff member not found");
+    }
+
+    // -------------------------------------------------
+    // Check employee number isn't taken by someone else
+    // -------------------------------------------------
+
+    const existingEmployee = await ctx.db
+      .query("fingerprintUsers")
+      .withIndex("by_employeeNumber", (q) =>
+        q.eq("employeeNumber", args.employeeNumber),
+      )
+      .unique();
+
+    if (existingEmployee && existingEmployee._id !== args.id) {
+      throw new Error(`Employee number ${args.employeeNumber} already exists`);
+    }
+
+    await ctx.db.patch(args.id, {
+      fullName: args.fullName,
+      employeeNumber: args.employeeNumber,
+      department: args.department,
+      role: args.role,
+      active: args.active,
+    });
+
+    return { success: true };
+  },
+});

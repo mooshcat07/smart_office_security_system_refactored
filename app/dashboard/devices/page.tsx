@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
+import { useEffect, useRef } from "react";
 import { api } from "@/convex/_generated/api";
 import {
   Card,
@@ -10,11 +11,35 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { BuzzerControl } from "@/components/buzzer-control";
 import { WifiIcon, WifiOff } from "lucide-react";
+import { toast } from "sonner";
+import { BuzzerControl } from "@/components/buzzer-control";
 
 export default function DevicesPage() {
   const devices = useQuery(api.devices.queries.list);
+
+  // Track per-device online state to detect individual device status changes
+  const prevStatusRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!devices) return;
+
+    devices.forEach((device) => {
+      const isOnline = Date.now() - device.lastSeen < 60_000;
+      const prev = prevStatusRef.current[device._id];
+
+      // Only notify on change, not on first load
+      if (prev !== undefined && prev !== isOnline) {
+        if (!isOnline) {
+          toast.warning(`⚠️ ${device.name} went offline`)
+        } else {
+          toast.success(`✅ ${device.name} is back online`)
+        }
+      }
+
+      prevStatusRef.current[device._id] = isOnline;
+    });
+  }, [devices]);
 
   if (!devices) {
     return (
@@ -35,14 +60,25 @@ export default function DevicesPage() {
     );
   }
 
+  const onlineCount = devices.filter((d) => Date.now() - d.lastSeen < 60_000).length;
+
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 lg:p-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Devices</h1>
-        <p className="text-muted-foreground">
-          Manage and monitor your ESP32 security devices
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Devices</h1>
+          <p className="text-muted-foreground">
+            Manage and monitor your ESP32 security devices
+          </p>
+        </div>
+        {/* <Badge
+          variant={onlineCount === devices.length ? "default" : "destructive"}
+          className="text-sm px-3 py-1"
+        >
+          {onlineCount}/{devices.length} Online
+        </Badge> */}
       </div>
+
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {devices.map((device) => {
           const isOnline = Date.now() - device.lastSeen < 60_000;
@@ -52,9 +88,7 @@ export default function DevicesPage() {
               <CardHeader>
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <CardTitle className="line-clamp-1">
-                      {device.name}
-                    </CardTitle>
+                    <CardTitle className="line-clamp-1">{device.name}</CardTitle>
                     <CardDescription className="line-clamp-1">
                       {device.location}
                     </CardDescription>
@@ -82,11 +116,10 @@ export default function DevicesPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-muted-foreground">Last Seen:</span>
-                    <span>
+                    <span className={!isOnline ? "text-red-500" : ""}>
                       {new Date(device.lastSeen).toLocaleTimeString()}
                     </span>
                   </div>
-
                   {device.firmware && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Firmware:</span>
