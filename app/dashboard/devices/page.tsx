@@ -1,8 +1,6 @@
 "use client";
 
-import { useQuery } from "convex/react";
-import { useEffect, useRef } from "react";
-import { api } from "@/convex/_generated/api";
+import { useDevicePresence } from "@/hooks/use-device-presence";
 import {
   Card,
   CardContent,
@@ -12,34 +10,11 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { WifiIcon, WifiOff } from "lucide-react";
-import { toast } from "sonner";
 import { BuzzerControl } from "@/components/buzzer-control";
 
 export default function DevicesPage() {
-  const devices = useQuery(api.devices.queries.list);
-
-  // Track per-device online state to detect individual device status changes
-  const prevStatusRef = useRef<Record<string, boolean>>({});
-
-  useEffect(() => {
-    if (!devices) return;
-
-    devices.forEach((device) => {
-      const isOnline = Date.now() - device.lastSeen < 60_000;
-      const prev = prevStatusRef.current[device._id];
-
-      // Only notify on change, not on first load
-      if (prev !== undefined && prev !== isOnline) {
-        if (!isOnline) {
-          toast.warning(`⚠️ ${device.name} went offline`)
-        } else {
-          toast.success(`✅ ${device.name} is back online`)
-        }
-      }
-
-      prevStatusRef.current[device._id] = isOnline;
-    });
-  }, [devices]);
+  // Re-checks the heartbeat every 10s and toasts on online/offline changes
+  const { devices } = useDevicePresence({ notify: true });
 
   if (!devices) {
     return (
@@ -60,8 +35,6 @@ export default function DevicesPage() {
     );
   }
 
-  const onlineCount = devices.filter((d) => Date.now() - d.lastSeen < 60_000).length;
-
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 lg:p-6">
       <div className="flex items-start justify-between">
@@ -71,17 +44,11 @@ export default function DevicesPage() {
             Manage and monitor your ESP32 security devices
           </p>
         </div>
-        {/* <Badge
-          variant={onlineCount === devices.length ? "default" : "destructive"}
-          className="text-sm px-3 py-1"
-        >
-          {onlineCount}/{devices.length} Online
-        </Badge> */}
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {devices.map((device) => {
-          const isOnline = Date.now() - device.lastSeen < 60_000;
+          const { isOnline } = device;
 
           return (
             <Card key={device._id} className="flex flex-col">
@@ -120,6 +87,14 @@ export default function DevicesPage() {
                       {new Date(device.lastSeen).toLocaleTimeString()}
                     </span>
                   </div>
+                  {!isOnline && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Offline for:</span>
+                      <span className="text-red-500 font-medium">
+                        {device.offlineFor}
+                      </span>
+                    </div>
+                  )}
                   {device.firmware && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Firmware:</span>
