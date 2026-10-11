@@ -19,5 +19,9 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24,
   },
   plugins: [nextCookies()],
-  trustedOrigins: ["http://localhost:3000", "https://mooshcat07-smartofficesecuritysyste.vercel.app/"],
+  trustedOrigins: [
+    "http://localhost:3000", 
+    "https://mooshcat07-smartofficesecuritysyste.vercel.app/",
+    "https://mooshcat07-smartofficesecuritysyste.vercel.app"
+  ],
 });
