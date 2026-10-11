@@ -58,11 +58,16 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
-              className="data-[slot=sidebar-menu-button]:p-1.5!"
+              className="data-[slot=sidebar-menu-button]:p-1.5! gap-2.5"
               render={<a href="/dashboard" />}
             >
-              <ShieldIcon className="size-5! text-primary" />
-              <span className="text-base font-semibold">Herotic Security</span>
+              <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+                <ShieldIcon className="size-4" />
+              </div>
+              <div className="flex flex-col gap-0.5 leading-none">
+                <span className="text-sm font-semibold tracking-tight">Herotic Security</span>
+                <span className="text-[11px] text-muted-foreground">Access Control</span>
+              </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -74,20 +79,18 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
-                if(pathname == item.url) {
-                  return (
-                    <SidebarMenuItem key={item.title}>
-                      <SidebarMenuButton className="bg-zinc-200 hover:bg-zinc-200" render={<Link href={item.url} />}>
-                        <item.icon className="size-4" />
-                        <span>{item.title}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  )
-                }
-
+                const isActive = pathname === item.url
                 return (
                   <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton render={<Link href={item.url} />}>
+                    <SidebarMenuButton
+                      isActive={isActive}
+                      className={
+                        isActive
+                          ? "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent font-medium"
+                          : "hover:bg-sidebar-accent/60"
+                      }
+                      render={<Link href={item.url} />}
+                    >
                       <item.icon className="size-4" />
                       <span>{item.title}</span>
                     </SidebarMenuButton>
