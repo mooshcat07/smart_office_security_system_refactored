@@ -19,5 +19,5 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24,
   },
   plugins: [nextCookies()],
-  trustedOrigins: ["http://localhost:3000"],
+  trustedOrigins: ["http://localhost:3000", "https://smart-office-security-system-refact.vercel.app"],
 });
