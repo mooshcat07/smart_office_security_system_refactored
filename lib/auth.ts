@@ -4,7 +4,7 @@ import { prismaAdapter } from "better-auth/adapters/prisma";
 import { nextCookies } from "better-auth/next-js";
 
 export const auth = betterAuth({
-  baseURL: process.env.BETTER_AUTH_URL,
+  baseURL: process.env.BETTER_AUTH_URL || "https://smartsecuritysystem.vercel.app",
   secret: process.env.BETTER_AUTH_SECRET,
   database: prismaAdapter(prisma, {
     provider: "postgresql",
@@ -20,7 +20,7 @@ export const auth = betterAuth({
   },
   plugins: [nextCookies()],
   trustedOrigins: [
-    "http://localhost:3000", 
-    "https://smartsecuritysystem.vercel.app/",
+    "http://localhost:3000",
+    "https://smartsecuritysystem.vercel.app",
   ],
 });
