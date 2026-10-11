@@ -21,7 +21,6 @@ export const auth = betterAuth({
   plugins: [nextCookies()],
   trustedOrigins: [
     "http://localhost:3000", 
-    "https://mooshcat07-smartofficesecuritysyste.vercel.app/",
-    "https://mooshcat07-smartofficesecuritysyste.vercel.app"
+    "https://smartsecuritysystem.vercel.app/",
   ],
 });
