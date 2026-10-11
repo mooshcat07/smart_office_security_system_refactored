@@ -22,6 +22,7 @@ import {
   BellIcon,
   UsersIcon,
   CpuIcon,
+  CameraIcon,
   Settings2Icon,
   CircleHelpIcon,
   ShieldIcon,
@@ -36,6 +37,7 @@ const navItems = [
   { title: "Alarms",           url: "/dashboard/alarms",        icon: BellIcon },
   { title: "Registered Users", url: "/dashboard/users",         icon: UsersIcon },
   { title: "Devices",          url: "/dashboard/devices",       icon: CpuIcon },
+  { title: "Camera",           url: "/dashboard/camera",        icon: CameraIcon },
 ]
 
 const navSecondaryItems = [
