@@ -41,10 +41,27 @@ export default function Page() {
   }, [stats?.onlineDevices, stats?.activeAlarms])
 
   useEffect(() => {
-    setTimeout(() => {
-      // Frontend checking after 30 seconds if the backend is still alive, if not, show a toast notification
-    }, 3000);
-  },[])
+    // Wait 30 seconds then check if any ESP32 is still online
+    const timeoutId = setTimeout(() => {
+      if (!stats) return
+
+      if (stats.totalDevices === 0) {
+        toast.warning("⚠️ No ESP32 devices registered")
+        return
+      }
+
+      if (stats.onlineDevices === 0) {
+        toast.error(
+          `🚨 All ESP32 devices offline — 0/${stats.totalDevices} online`
+        )
+      } else {
+        toast.success(
+          `✅ ESP32 online — ${stats.onlineDevices}/${stats.totalDevices} devices online`
+        )
+      }
+    }, 30_000)
+  }, [stats]
+  )
 
   return (
     <div className="flex flex-1 flex-col">
