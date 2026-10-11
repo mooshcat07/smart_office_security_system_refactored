@@ -263,7 +263,7 @@ export default function MotionEventsPage() {
           <CardDescription>PIR sensor triggers throughout today</CardDescription>
         </CardHeader>
         <CardContent>
-          <ChartContainer config={chartConfig} className="h-[200px] w-full">
+          <ChartContainer config={chartConfig} className="h-50 w-full">
             <BarChart data={hourlyData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="hour" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} interval={2} />
