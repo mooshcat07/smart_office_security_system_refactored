@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 
 // IP Webcam server running on the phone (same Wi-Fi as this computer)
-const CAMERA_URL = process.env.NEXT_PUBLIC_CAMERA_URL;
+const CAMERA_URL = "https://10.181.201.215:8080";
 
 export default function CameraPage() {
   const [status, setStatus] = useState<"connecting" | "live" | "error">(
