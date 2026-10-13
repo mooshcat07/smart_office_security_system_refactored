@@ -16,16 +16,16 @@ const char* WIFI_PASSWORD = "MooshMoosh07";
 // =====================================================
 
 const char* STATUS_API =
-    "http://10.235.241.232:3000/api/devices/status";
+    "http://10.168.224.232:3000/api/devices/status";
 
 const char* FINGERPRINT_API =
-    "http://10.235.241.232:3000/api/devices/fingerprint";
+    "http://10.168.224.232:3000/api/devices/fingerprint";
 
 const char* COMMAND_API =
-    "http://10.235.241.232:3000/api/devices/commands?esp32Id=ESP32-001";
+    "http://10.168.224.232:3000/api/devices/commands?esp32Id=ESP32-001";
 
 const char* COMMAND_RESULT_API =
-    "http://10.235.241.232:3000/api/devices/commands/result";
+    "http://10.168.224.232:3000/api/devices/commands/result";
 
 // =====================================================
 // Device
@@ -358,7 +358,11 @@ void sendDeviceStatus() {
 // Send fingerprint event
 // =====================================================
 
-void sendFingerprintEvent(
+// Returns true only if the SERVER granted access. The sensor
+// may recognise a print, but the server has the final say
+// (inactive / archived users are denied). If the server can't
+// be reached we fail closed (deny).
+bool sendFingerprintEvent(
   int fingerprintId,
   const char* result
 ) {
@@ -373,7 +377,7 @@ void sendFingerprintEvent(
       "Fingerprint event not sent."
     );
 
-    return;
+    return false;
   }
 
   HTTPClient http;
@@ -430,6 +434,38 @@ void sendFingerprintEvent(
   Serial.println(response);
 
   http.end();
+
+  if (responseCode != 200) {
+    return false;
+  }
+
+  JsonDocument responseDoc;
+
+  if (
+    deserializeJson(
+      responseDoc,
+      response
+    )
+  ) {
+    return false;
+  }
+
+  const char* serverStatus =
+    responseDoc["status"] | "DENIED";
+
+  const char* direction =
+    responseDoc["direction"] | "";
+
+  if (strlen(direction) > 0) {
+
+    Serial.print("Direction: ");
+    Serial.println(direction);
+  }
+
+  return strcmp(
+    serverStatus,
+    "GRANTED"
+  ) == 0;
 }
 
 // =====================================================
@@ -1239,24 +1275,40 @@ void scanFingerprint() {
     // GRANTED
     // -------------------------------------------------
 
-    sendFingerprintEvent(
-      finger.fingerID,
-      "GRANTED"
-    );
+    bool granted =
+      sendFingerprintEvent(
+        finger.fingerID,
+        "GRANTED"
+      );
 
-    // Turn LED on
-    digitalWrite(
-      LED_PIN,
-      HIGH
-    );
+    if (granted) {
 
-    delay(2000);
+      // Turn LED on
+      digitalWrite(
+        LED_PIN,
+        HIGH
+      );
 
-    // Turn LED off
-    digitalWrite(
-      LED_PIN,
-      LOW
-    );
+      delay(2000);
+
+      // Turn LED off
+      digitalWrite(
+        LED_PIN,
+        LOW
+      );
+
+    } else {
+
+      // Recognised print, but the server refused
+      // (inactive or archived user)
+      Serial.println(
+        "Access denied by server."
+      );
+
+      triggerBuzzer(
+        1000
+      );
+    }
 
   } else {
 

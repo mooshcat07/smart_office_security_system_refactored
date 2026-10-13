@@ -9,12 +9,10 @@ export const getDevices = query({
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const devices = await ctx.db.query("devices").order("desc").collect();
-    return devices.map((device) => ({
-      ...device,
-      // Device is online if a heartbeat
-      // was received within the last 60 seconds.
-      isOnline: Date.now() - device.lastSeen < 60_000,
-    }));
+    // Online/offline is NOT computed here: a Convex query only re-runs when
+    // data changes, so a device that stops sending heartbeats would stay
+    // "online" forever. Use the useDevicePresence() hook in the browser,
+    // which re-checks lastSeen every 10 seconds.
+    return await ctx.db.query("devices").order("desc").collect();
   },
 });

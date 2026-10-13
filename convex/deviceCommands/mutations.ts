@@ -90,8 +90,13 @@ export const acknowledgeCommand = mutation({
         )
         .unique();
 
+      // Never hard-delete: archive + deactivate so history is preserved
       if (fingerprintUser) {
-        await ctx.db.delete(fingerprintUser._id);
+        await ctx.db.patch(fingerprintUser._id, {
+          active: false,
+          archived: true,
+          archivedAt: Date.now(),
+        });
       }
     }
 
@@ -148,8 +153,13 @@ export const completeFingerprintDeletion = mutation({
       )
       .unique();
 
+    // Never hard-delete: archive + deactivate so history is preserved
     if (fingerprintUser) {
-      await ctx.db.delete(fingerprintUser._id);
+      await ctx.db.patch(fingerprintUser._id, {
+        active: false,
+        archived: true,
+        archivedAt: Date.now(),
+      });
     }
 
     await ctx.db.patch(command._id, {

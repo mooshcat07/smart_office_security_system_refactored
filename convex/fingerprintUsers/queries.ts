@@ -35,19 +35,29 @@ export const getRegisteredUsers = query({
       .query("fingerprintUsers")
       .collect();
 
-    const accessLogs = await ctx.db
-      .query("accessLogs")
-      .order("desc")
-      .collect();
+    const result = [];
 
-    return users.map((user) => {
-      const lastAccess = accessLogs.find(
-        (log) =>
-          log.status === "GRANTED" &&
-          log.fingerprintId === user.fingerprintId
+    for (const user of users) {
+      const logs = await ctx.db
+        .query("accessLogs")
+        .withIndex("by_fingerprintId", (q) =>
+          q.eq("fingerprintId", user.fingerprintId)
+        )
+        .order("desc")
+        .collect();
+
+      const lastAccess = logs.find(
+        (log) => log.status === "GRANTED"
       );
 
-      return {
+      const blockedAttempts = logs.filter(
+        (log) =>
+          log.status === "DENIED" &&
+          (log.denyReason === "INACTIVE" ||
+            log.denyReason === "ARCHIVED")
+      );
+
+      result.push({
         id: user._id,
         fingerprintId: user.fingerprintId,
         name: user.fullName,
@@ -63,9 +73,11 @@ export const getRegisteredUsers = query({
         // don't accidentally save the literal "Not assigned" text.
         rawDepartment: user.department ?? "",
 
-        status: user.active
-          ? ("ACTIVE" as const)
-          : ("INACTIVE" as const),
+        status: user.archived
+          ? ("ARCHIVED" as const)
+          : user.active
+            ? ("ACTIVE" as const)
+            : ("INACTIVE" as const),
 
         fingerprintRegistered: true,
 
@@ -78,7 +90,17 @@ export const getRegisteredUsers = query({
               lastAccess._creationTime
             ).toISOString()
           : null,
-      };
-    });
+
+        // Scans refused because the user is inactive/archived
+        blockedAttempts: blockedAttempts.length,
+        lastBlockedAttempt: blockedAttempts[0]
+          ? new Date(
+              blockedAttempts[0]._creationTime
+            ).toISOString()
+          : null,
+      });
+    }
+
+    return result;
   },
 });

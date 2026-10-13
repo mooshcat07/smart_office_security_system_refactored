@@ -10,7 +10,11 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table"
+import Link from "next/link"
 import {
+  BarChart3Icon,
+  LogInIcon,
+  LogOutIcon,
   ShieldCheckIcon,
   ShieldXIcon,
   ChevronLeftIcon,
@@ -21,7 +25,7 @@ import {
 import { useQuery } from "convex/react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
   Table,
@@ -54,7 +58,25 @@ type AccessLog = {
   device: string
   location: string
   status: "GRANTED" | "DENIED"
+  direction: "ENTRY" | "EXIT" | null
+  durationMs: number | null
+  denyReason: "UNRECOGNISED" | "INACTIVE" | "ARCHIVED" | null
   timestamp: string
+}
+
+const denyReasonLabel = {
+  UNRECOGNISED: "Unrecognised fingerprint",
+  INACTIVE: "User is inactive",
+  ARCHIVED: "User is archived",
+} as const
+
+function formatDuration(ms: number) {
+  const totalMinutes = Math.max(Math.round(ms / 60000), 0)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  if (hours === 0) return `${minutes}m`
+  return `${hours}h ${minutes}m`
 }
 
 const columns: ColumnDef<AccessLog>[] = [
@@ -105,6 +127,55 @@ const columns: ColumnDef<AccessLog>[] = [
   },
 
   {
+    accessorKey: "direction",
+
+    header: "Entry / Exit",
+
+    cell: ({ row }) => {
+      const { direction } = row.original
+
+      if (!direction) {
+        return (
+          <span className="text-xs text-muted-foreground">—</span>
+        )
+      }
+
+      return direction === "ENTRY" ? (
+        <Badge
+          variant="outline"
+          className="text-green-600 border-green-300 bg-green-50 dark:bg-green-950/30"
+        >
+          <LogInIcon className="size-3 mr-1" />
+          Entry
+        </Badge>
+      ) : (
+        <Badge
+          variant="outline"
+          className="text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950/30"
+        >
+          <LogOutIcon className="size-3 mr-1" />
+          Exit
+        </Badge>
+      )
+    },
+  },
+
+  {
+    accessorKey: "durationMs",
+
+    header: "Time Inside",
+
+    cell: ({ row }) =>
+      row.original.durationMs !== null ? (
+        <span className="text-sm font-medium">
+          {formatDuration(row.original.durationMs)}
+        </span>
+      ) : (
+        <span className="text-xs text-muted-foreground">—</span>
+      ),
+  },
+
+  {
     accessorKey: "status",
 
     header: "Status",
@@ -114,22 +185,30 @@ const columns: ColumnDef<AccessLog>[] = [
         row.original.status === "GRANTED"
 
       return (
-        <Badge
-          variant="outline"
-          className={
-            granted
-              ? "text-green-600 border-green-300 bg-green-50 dark:bg-green-950/30"
-              : "text-red-600 border-red-300 bg-red-50 dark:bg-red-950/30"
-          }
-        >
-          {granted ? (
-            <ShieldCheckIcon className="size-3 mr-1" />
-          ) : (
-            <ShieldXIcon className="size-3 mr-1" />
-          )}
+        <div className="flex flex-col gap-1">
+          <Badge
+            variant="outline"
+            className={
+              granted
+                ? "w-fit text-green-600 border-green-300 bg-green-50 dark:bg-green-950/30"
+                : "w-fit text-red-600 border-red-300 bg-red-50 dark:bg-red-950/30"
+            }
+          >
+            {granted ? (
+              <ShieldCheckIcon className="size-3 mr-1" />
+            ) : (
+              <ShieldXIcon className="size-3 mr-1" />
+            )}
 
-          {granted ? "Granted" : "Denied"}
-        </Badge>
+            {granted ? "Granted" : "Denied"}
+          </Badge>
+
+          {!granted && row.original.denyReason && (
+            <span className="text-xs text-red-600">
+              {denyReasonLabel[row.original.denyReason]}
+            </span>
+          )}
+        </div>
       )
     },
   },
@@ -330,14 +409,29 @@ export default function AccessLogsPage() {
       {/* Table */}
 
       <Card>
-        <CardHeader>
-          <CardTitle>
-            All Access Events
-          </CardTitle>
+        <CardHeader className="flex flex-row items-start justify-between gap-4">
+          <div>
+            <CardTitle>
+              All Access Events
+            </CardTitle>
 
-          <CardDescription>
-            Every fingerprint scan across all devices
-          </CardDescription>
+            <CardDescription>
+              Every fingerprint scan across all devices
+            </CardDescription>
+          </div>
+
+          <Link
+            href="/dashboard/access-logs/summary"
+            title="Attendance summary"
+            aria-label="Open attendance summary"
+            className={buttonVariants({
+              variant: "outline",
+              size: "sm",
+            })}
+          >
+            <BarChart3Icon className="size-4" />
+            Summary
+          </Link>
         </CardHeader>
 
         <CardContent>
