@@ -27,14 +27,22 @@ type DashboardStats = {
   totalDevices: number;
 };
 
-export function SectionCards({ stats }: { stats?: DashboardStats }) {
+type OfflineDevice = { name: string; offlineFor: string };
+
+export function SectionCards({
+  stats,
+  offlineDevices = [],
+}: {
+  stats?: DashboardStats;
+  offlineDevices?: OfflineDevice[];
+}) {
   const allDevicesOnline =
     stats &&
     stats.totalDevices > 0 &&
     stats.onlineDevices === stats.totalDevices;
 
   return (
-    <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-card *:data-[slot=card]:shadow-sm *:data-[slot=card]:ring-1 *:data-[slot=card]:ring-border/60 lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+    <div className="grid grid-cols-1 gap-4 px-4 *:data-[slot=card]:bg-linear-to-t *:data-[slot=card]:from-primary/5 *:data-[slot=card]:to-card *:data-[slot=card]:shadow-xs lg:px-6 @xl/main:grid-cols-2 @5xl/main:grid-cols-4 dark:*:data-[slot=card]:bg-card">
       {/* Total Access Events */}
       <Card className="@container/card">
         <CardHeader>
@@ -184,7 +192,19 @@ export function SectionCards({ stats }: { stats?: DashboardStats }) {
               : "Loading device status..."}
           </div>
 
-          <div className="text-muted-foreground">IoT security devices</div>
+          <div
+            className={
+              offlineDevices.length > 0
+                ? "text-red-500"
+                : "text-muted-foreground"
+            }
+          >
+            {offlineDevices.length > 0
+              ? offlineDevices
+                  .map((d) => `${d.name} offline for ${d.offlineFor}`)
+                  .join(" · ")
+              : "IoT security devices"}
+          </div>
         </CardFooter>
       </Card>
     </div>

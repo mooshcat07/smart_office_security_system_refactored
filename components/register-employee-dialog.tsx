@@ -10,6 +10,7 @@ import {
 } from "lucide-react"
 
 import { useMutation, useQuery } from "convex/react"
+import { useDevicePresence } from "@/hooks/use-device-presence"
 import { api } from "@/convex/_generated/api"
 
 import { Button } from "@/components/ui/button"
@@ -80,7 +81,9 @@ export function RegisterEmployeeDialog({
   // DEVICES
   // ------------------------------------------
 
-  const devices = useQuery(api.devices.queries.list)
+  // Live online/offline (re-checked every 10s in the browser). The raw
+  // `devices.queries.list` result never flips to offline on its own.
+  const { devices } = useDevicePresence()
 
   // ------------------------------------------
   // NEXT FINGERPRINT SLOT

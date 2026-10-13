@@ -20,7 +20,11 @@ export default defineSchema({
     employeeNumber: v.string(),
     department: v.optional(v.string()),
     role: v.optional(v.string()),
+    // active=false  -> deactivated: scans are DENIED, record kept
     active: v.boolean(),
+    // archived=true -> removed from day-to-day use, record kept (never hard-deleted)
+    archived: v.optional(v.boolean()),
+    archivedAt: v.optional(v.number()),
   })
     .index("by_fingerprintId", ["fingerprintId"])
     .index("by_employeeNumber", ["employeeNumber"]),
@@ -33,9 +37,22 @@ export default defineSchema({
     employeeName: v.optional(v.string()),
     employeeNumber: v.optional(v.string()),
     status: v.union(v.literal("GRANTED"), v.literal("DENIED")),
+    // Alternating entry/exit for GRANTED scans (older logs have none)
+    direction: v.optional(v.union(v.literal("ENTRY"), v.literal("EXIT"))),
+    // On EXIT rows: time spent inside since the matching ENTRY
+    durationMs: v.optional(v.number()),
+    // Why a scan was DENIED
+    denyReason: v.optional(
+      v.union(
+        v.literal("UNRECOGNISED"),
+        v.literal("INACTIVE"),
+        v.literal("ARCHIVED"),
+      ),
+    ),
   })
     .index("by_device", ["deviceId"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_fingerprintId", ["fingerprintId"]),
 
   // PIR motion detection events
   motionEvents: defineTable({

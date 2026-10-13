@@ -7,7 +7,9 @@ import {
   UserXIcon,
   MoreHorizontalIcon,
   PencilIcon,
-  Trash2Icon,
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  ShieldAlertIcon,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -26,15 +28,16 @@ import {
 import { api } from "@/convex/_generated/api"
 import type { Id } from "@/convex/_generated/dataModel"
 import { flexRender, getCoreRowModel, getFilteredRowModel, getPaginationRowModel, getSortedRowModel, SortingState, useReactTable } from "@tanstack/react-table"
-import { useQuery } from "convex/react"
+import { useMutation, useQuery } from "convex/react"
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from "lucide-react"
 import React from "react"
 import { RegisterEmployeeDialog } from "@/components/register-employee-dialog"
 import { EditEmployeeDialog, type EditableEmployee } from "@/components/edit-employee-dialog"
-import { DeleteEmployeeDialog, type DeletableEmployee } from "@/components/delete-employee-dialog"
+import { ArchiveEmployeeDialog, type ArchivableEmployee } from "@/components/archive-employee-dialog"
+import { toast } from "@/components/ui/toast"
 
 type UserRole = "ADMIN" | "STAFF" | "SECURITY"
-type UserStatus = "ACTIVE" | "INACTIVE"
+type UserStatus = "ACTIVE" | "INACTIVE" | "ARCHIVED"
 
 type RegisteredUser = {
   id: Id<"fingerprintUsers">
@@ -48,6 +51,8 @@ type RegisteredUser = {
   fingerprintRegistered: boolean
   registeredAt: string
   lastAccess: string | null
+  blockedAttempts: number
+  lastBlockedAttempt: string | null
 }
 
 const roleStyles: Record<UserRole, string> = {
@@ -156,24 +161,49 @@ const baseColumns: ColumnDef<RegisteredUser>[] = [
 
     header: "Status",
 
-    cell: ({ row }) =>
-      row.original.status === "ACTIVE" ? (
-        <Badge
-          variant="outline"
-          className="text-green-600 border-green-300 bg-green-50 dark:bg-green-950/30"
-        >
-          <UserCheckIcon className="size-3 mr-1" />
-          Active
-        </Badge>
-      ) : (
-        <Badge
-          variant="outline"
-          className="text-gray-500 border-gray-300 bg-gray-50 dark:bg-gray-900/30"
-        >
-          <UserXIcon className="size-3 mr-1" />
-          Inactive
-        </Badge>
-      ),
+    cell: ({ row }) => {
+      const { status, blockedAttempts, lastBlockedAttempt } = row.original
+
+      return (
+        <div className="flex flex-col gap-1">
+          {status === "ACTIVE" ? (
+            <Badge
+              variant="outline"
+              className="w-fit text-green-600 border-green-300 bg-green-50 dark:bg-green-950/30"
+            >
+              <UserCheckIcon className="size-3 mr-1" />
+              Active
+            </Badge>
+          ) : (
+            <Badge
+              variant="outline"
+              className="w-fit text-red-600 border-red-300 bg-red-50 dark:bg-red-950/30"
+            >
+              {status === "ARCHIVED" ? (
+                <ArchiveIcon className="size-3 mr-1" />
+              ) : (
+                <UserXIcon className="size-3 mr-1" />
+              )}
+              {status === "ARCHIVED" ? "Archived" : "Inactive"}
+            </Badge>
+          )}
+
+          {status !== "ACTIVE" && blockedAttempts > 0 && lastBlockedAttempt && (
+            <div className="flex items-center gap-1 text-xs text-red-600">
+              <ShieldAlertIcon className="size-3" />
+              {blockedAttempts} blocked{" "}
+              {blockedAttempts === 1 ? "attempt" : "attempts"}, last{" "}
+              {new Date(lastBlockedAttempt).toLocaleString("en-GB", {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </div>
+          )}
+        </div>
+      )
+    },
   },
 
   {
@@ -226,7 +256,8 @@ const baseColumns: ColumnDef<RegisteredUser>[] = [
 
 function getActionsColumn(
   onEdit: (user: RegisteredUser) => void,
-  onDelete: (user: RegisteredUser) => void
+  onArchive: (user: RegisteredUser) => void,
+  onRestore: (user: RegisteredUser) => void
 ): ColumnDef<RegisteredUser> {
   return {
     id: "actions",
@@ -245,14 +276,20 @@ function getActionsColumn(
             Edit
           </DropdownMenuItem>
 
-          <DropdownMenuItem
-            variant="destructive"
-            disabled={!row.original.fingerprintRegistered}
-            onClick={() => onDelete(row.original)}
-          >
-            <Trash2Icon className="size-3.5" />
-            Delete
-          </DropdownMenuItem>
+          {row.original.status === "ARCHIVED" ? (
+            <DropdownMenuItem onClick={() => onRestore(row.original)}>
+              <ArchiveRestoreIcon className="size-3.5" />
+              Restore
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => onArchive(row.original)}
+            >
+              <ArchiveIcon className="size-3.5" />
+              Archive
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     ),
@@ -269,7 +306,28 @@ export default function UsersPage() {
   const [search, setSearch] = React.useState("")
   const [registerOpen, setRegisterOpen] = React.useState(false)
   const [editingUser, setEditingUser] = React.useState<RegisteredUser | null>(null)
-  const [deletingUser, setDeletingUser] = React.useState<RegisteredUser | null>(null)
+  const [archivingUser, setArchivingUser] = React.useState<RegisteredUser | null>(null)
+
+  const restoreUser = useMutation(
+    api.fingerprintUsers.mutation.restoreFingerprintUser
+  )
+
+  const handleRestore = React.useCallback(
+    async (user: RegisteredUser) => {
+      try {
+        await restoreUser({ id: user.id })
+        toast.add({ type: "success", title: `${user.name} restored` })
+      } catch (err) {
+        toast.add({
+          type: "error",
+          title: "Restore failed",
+          description:
+            err instanceof Error ? err.message : "Failed to restore employee.",
+        })
+      }
+    },
+    [restoreUser]
+  )
 
   const users = useQuery(
     api.fingerprintUsers.queries.getRegisteredUsers
@@ -313,9 +371,9 @@ export default function UsersPage() {
   const columns = React.useMemo(
     () => [
       ...baseColumns,
-      getActionsColumn(setEditingUser, setDeletingUser),
+      getActionsColumn(setEditingUser, setArchivingUser, handleRestore),
     ],
-    []
+    [handleRestore]
   )
 
   const table = useReactTable({
@@ -483,6 +541,10 @@ export default function UsersPage() {
                 <SelectItem value="INACTIVE">
                   Inactive
                 </SelectItem>
+
+                <SelectItem value="ARCHIVED">
+                  Archived
+                </SelectItem>
               </SelectContent>
             </Select>
 
@@ -528,9 +590,11 @@ export default function UsersPage() {
                         <TableRow
                           key={row.id}
                           className={
-                            !row.original.fingerprintRegistered
-                              ? "bg-orange-50/30 dark:bg-orange-950/10"
-                              : ""
+                            row.original.status !== "ACTIVE"
+                              ? "bg-red-50/60 hover:bg-red-50 dark:bg-red-950/20"
+                              : !row.original.fingerprintRegistered
+                                ? "bg-orange-50/30 dark:bg-orange-950/10"
+                                : ""
                           }
                         >
                           {row
@@ -618,16 +682,16 @@ export default function UsersPage() {
         }
       />
 
-      <DeleteEmployeeDialog
-        open={deletingUser !== null}
-        onOpenChange={(open) => !open && setDeletingUser(null)}
+      <ArchiveEmployeeDialog
+        open={archivingUser !== null}
+        onOpenChange={(open) => !open && setArchivingUser(null)}
         employee={
-          deletingUser
+          archivingUser
             ? ({
-                name: deletingUser.name,
-                employeeNumber: deletingUser.employeeNumber,
-                fingerprintId: deletingUser.fingerprintId,
-              } satisfies DeletableEmployee)
+                id: archivingUser.id,
+                name: archivingUser.name,
+                employeeNumber: archivingUser.employeeNumber,
+              } satisfies ArchivableEmployee)
             : null
         }
       />

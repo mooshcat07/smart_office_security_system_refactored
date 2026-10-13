@@ -81,7 +81,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => {
-                const isActive = pathname === item.url
+                const isActive =
+                  item.url === "/dashboard"
+                    ? pathname === item.url
+                    : pathname.startsWith(item.url)
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton

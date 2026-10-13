@@ -144,6 +144,10 @@ export const updateFingerprintUser = mutation({
       throw new Error("Staff member not found");
     }
 
+    if (user.archived && args.active) {
+      throw new Error("This staff member is archived. Restore them first.");
+    }
+
     // -------------------------------------------------
     // Check employee number isn't taken by someone else
     // -------------------------------------------------
@@ -165,6 +169,59 @@ export const updateFingerprintUser = mutation({
       department: args.department,
       role: args.role,
       active: args.active,
+    });
+
+    return { success: true };
+  },
+});
+
+// =====================================================
+// Archive a staff member (replaces hard delete)
+//
+// The record, its fingerprint ID and all access history are
+// kept. The user is deactivated, so every scan is DENIED.
+// The template stays on the sensor so they can be restored
+// later without re-enrolling.
+// =====================================================
+
+export const archiveFingerprintUser = mutation({
+  args: { id: v.id("fingerprintUsers") },
+
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.id);
+
+    if (!user) {
+      throw new Error("Staff member not found");
+    }
+
+    await ctx.db.patch(args.id, {
+      active: false,
+      archived: true,
+      archivedAt: Date.now(),
+    });
+
+    return { success: true };
+  },
+});
+
+// =====================================================
+// Restore an archived staff member (back to active)
+// =====================================================
+
+export const restoreFingerprintUser = mutation({
+  args: { id: v.id("fingerprintUsers") },
+
+  handler: async (ctx, args) => {
+    const user = await ctx.db.get(args.id);
+
+    if (!user) {
+      throw new Error("Staff member not found");
+    }
+
+    await ctx.db.patch(args.id, {
+      active: true,
+      archived: false,
+      archivedAt: undefined,
     });
 
     return { success: true };

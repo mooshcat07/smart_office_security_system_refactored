@@ -45,7 +45,7 @@ export type EditableEmployee = {
   employeeNumber: string
   rawDepartment: string
   role: UserRole
-  status: "ACTIVE" | "INACTIVE"
+  status: "ACTIVE" | "INACTIVE" | "ARCHIVED"
 }
 
 export function EditEmployeeDialog({
@@ -202,11 +202,13 @@ export function EditEmployeeDialog({
               <Checkbox
                 id="edit-active"
                 checked={active}
-                disabled={isSaving}
+                disabled={isSaving || employee?.status === "ARCHIVED"}
                 onCheckedChange={(checked) => setActive(checked === true)}
               />
               <FieldLabel htmlFor="edit-active" className="font-normal">
-                Active — can access secured areas
+                {employee?.status === "ARCHIVED"
+                  ? "Archived — restore this employee to reactivate"
+                  : "Active — untick to deny this employee entry"}
               </FieldLabel>
             </Field>
           </FieldGroup>

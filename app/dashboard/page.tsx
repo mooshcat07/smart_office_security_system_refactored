@@ -6,68 +6,46 @@ import { ChartAreaInteractive } from "@/components/chart-area-interactive"
 import { DataTable, type AccessLog } from "@/components/data-table"
 import { SectionCards } from "@/components/section-cards"
 import { api } from "../../convex/_generated/api"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
+import { useDevicePresence } from "@/hooks/use-device-presence"
 
 export default function Page() {
   const stats = useQuery(api.dashboard.queries.getDashboardStats)
   const recentLogs = useQuery(api.dashboard.queries.getRecentAccessLogs)
 
-  // Track previous device online count to detect changes
-  const prevOnlineRef = useRef<number | null>(null)
+  // Re-checks the heartbeat every 10s and toasts on online/offline changes
+  const { devices, onlineCount, totalCount } = useDevicePresence({ notify: true })
+
   const prevAlarmsRef = useRef<number | null>(null)
 
   useEffect(() => {
     if (!stats) return
 
-    // Heartbeat check — notify when a device goes offline or comes back
-    if (prevOnlineRef.current !== null && prevOnlineRef.current !== stats.onlineDevices) {
-      if (stats.onlineDevices < prevOnlineRef.current) {
-        toast.warning(
-          `⚠️ Device went offline — ${stats.onlineDevices}/${stats.totalDevices} devices online`
-        )
-      } else {
-        toast.success(
-          `✅ Device back online — ${stats.onlineDevices}/${stats.totalDevices} devices online`
-        )
-      }
-    }
-    prevOnlineRef.current = stats.onlineDevices
-
     // Alarm check — notify when new active alarm appears
     if (prevAlarmsRef.current !== null && stats.activeAlarms > prevAlarmsRef.current) {
-      toast.error(`🚨 New alarm triggered — ${stats.activeAlarms} active alarm(s)`)
+      toast.add({
+        type: "error",
+        title: "New alarm triggered",
+        description: `${stats.activeAlarms} active alarm(s)`,
+      })
     }
     prevAlarmsRef.current = stats.activeAlarms
-  }, [stats?.onlineDevices, stats?.activeAlarms])
+  }, [stats?.activeAlarms])
 
-  useEffect(() => {
-    // Wait 30 seconds then check if any ESP32 is still online
-    const timeoutId = setTimeout(() => {
-      if (!stats) return
+  // Replace the server's (stale-prone) device counts with the live ones
+  const liveStats = stats
+    ? { ...stats, onlineDevices: onlineCount, totalDevices: totalCount }
+    : undefined
 
-      if (stats.totalDevices === 0) {
-        toast.warning("⚠️ No ESP32 devices registered")
-        return
-      }
-
-      if (stats.onlineDevices === 0) {
-        toast.error(
-          `🚨 All ESP32 devices offline — 0/${stats.totalDevices} online`
-        )
-      } else {
-        toast.success(
-          `✅ ESP32 online — ${stats.onlineDevices}/${stats.totalDevices} devices online`
-        )
-      }
-    }, 30_000)
-  }, [stats]
-  )
+  const offlineDevices = (devices ?? [])
+    .filter((d) => !d.isOnline)
+    .map((d) => ({ name: d.name, offlineFor: d.offlineFor ?? "" }))
 
   return (
     <div className="flex flex-1 flex-col">
       <div className="@container/main flex flex-1 flex-col gap-2">
         <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
-          <SectionCards stats={stats} />
+          <SectionCards stats={liveStats} offlineDevices={offlineDevices} />
           <div className="px-4 lg:px-6">
             <ChartAreaInteractive />
           </div>
