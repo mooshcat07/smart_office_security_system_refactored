@@ -16,16 +16,16 @@ const char* WIFI_PASSWORD = "MooshMoosh07";
 // =====================================================
 
 const char* STATUS_API =
-    "http://10.168.224.232:3000/api/devices/status";
+    "http://10.182.158.232:3000/api/devices/status";
 
 const char* FINGERPRINT_API =
-    "http://10.168.224.232:3000/api/devices/fingerprint";
+    "http://10.182.158.232:3000/api/devices/fingerprint";
 
 const char* COMMAND_API =
-    "http://10.168.224.232:3000/api/devices/commands?esp32Id=ESP32-001";
+    "http://10.182.158.232:3000/api/devices/commands?esp32Id=ESP32-001";
 
 const char* COMMAND_RESULT_API =
-    "http://10.168.224.232:3000/api/devices/commands/result";
+    "http://10.182.158.232:3000/api/devices/commands/result";
 
 // =====================================================
 // Device
