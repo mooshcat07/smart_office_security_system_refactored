@@ -16,30 +16,39 @@ const char* WIFI_PASSWORD = "MooshMoosh07";
 // =====================================================
 
 const char* STATUS_API =
-    "http://10.182.158.232:3000/api/devices/status";
+    "http://10.140.2.232:3000/api/devices/status";
 
 const char* FINGERPRINT_API =
-    "http://10.182.158.232:3000/api/devices/fingerprint";
+    "http://10.140.2.232:3000/api/devices/fingerprint";
 
 const char* COMMAND_API =
-    "http://10.182.158.232:3000/api/devices/commands?esp32Id=ESP32-001";
+    "http://10.140.2.232:3000/api/devices/commands?esp32Id=ESP32-001";
 
 const char* COMMAND_RESULT_API =
-    "http://10.182.158.232:3000/api/devices/commands/result";
+    "http://10.140.2.232:3000/api/devices/commands/result";
+
+const char* MOTION_API =
+    "http://10.140.2.232:3000/api/devices/motion";
 
 // =====================================================
 // Device
 // =====================================================
 
 const char* ESP32_ID = "ESP32-001";
-const char* FIRMWARE_VERSION = "1.0.0";
+const char* FIRMWARE_VERSION = "1.0.2";
 
 // =====================================================
 // Hardware
 // =====================================================
 
-#define LED_PIN 4
+#define LED_PIN 4        // green LED: access granted
+#define RED_LED_PIN 18   // red LED: fingerprint failed
 #define BUZZER_PIN 21
+
+// HC-SR501 PIR motion sensor
+// Pinout (facing the pins): GND | OUT | VCC
+// Wiring: GND -> GND, VCC -> VIN (5V), OUT -> GPIO 26
+#define PIR_PIN 26
 
 // AS608 fingerprint sensor
 #define FINGER_RX 16
@@ -51,388 +60,335 @@ Adafruit_Fingerprint finger =
     Adafruit_Fingerprint(&fingerSerial);
 
 // =====================================================
+// Timing (feedback + polling)
+// =====================================================
+
+const unsigned long LED_FEEDBACK_MS = 2000;      // green / red LED — longer so scan is easier to see
+const unsigned long BUZZER_FEEDBACK_MS = 1000;   // short deny pulse
+const unsigned long MOTION_ALARM_BUZZER_MS = 1000;
+const unsigned long COMMAND_INTERVAL = 3000;
+const unsigned long STATUS_INTERVAL = 30000;
+const unsigned long MOTION_COOLDOWN_MS = 10000;
+const unsigned long LOOP_IDLE_MS = 20;
+const unsigned long SENSOR_RECHECK_EVERY_N = 5;  // re-verify AS608 every N heartbeats
+
+// HC-SR501 needs ~30–60 s after power-on to stabilise (false triggers while warming).
+// We wait this long, then until OUT goes LOW (settled), before trusting PIR / sending heartbeat.
+const unsigned long PIR_WARMUP_MS = 30000;
+const unsigned long PIR_SETTLE_TIMEOUT_MS = 15000;  // max extra wait for LOW after warm-up
+
+// =====================================================
 // Fingerprint sensor state
 // =====================================================
 
 bool fingerprintConnected = false;
-
 uint16_t fingerprintTemplateCount = 0;
+uint8_t statusCycleCount = 0;
 
 // =====================================================
-// Buzzer state
+// Buzzer state (non-blocking)
 // =====================================================
 
 bool buzzerActive = false;
-
 unsigned long buzzerStopTime = 0;
 
 // =====================================================
-// Command state
+// LED state (non-blocking — same idea as buzzer)
+// =====================================================
+
+bool greenLedActive = false;
+unsigned long greenLedStopTime = 0;
+
+bool redLedActive = false;
+unsigned long redLedStopTime = 0;
+
+// =====================================================
+// Command / heartbeat / PIR state
 // =====================================================
 
 unsigned long lastCommandCheck = 0;
-
-const unsigned long COMMAND_INTERVAL = 3000;
-
 bool enrollmentRunning = false;
-
-// =====================================================
-// Heartbeat
-// =====================================================
 
 unsigned long lastStatusTime = 0;
 
-const unsigned long STATUS_INTERVAL = 30000;
+bool lastPirState = false;
+unsigned long lastMotionReport = 0;
+bool pirReady = false;  // false until warm-up + settle complete
 
 // =====================================================
-// Connect to Wi-Fi
-// =====================================================
-
-void connectWiFi() {
-
-  Serial.println();
-  Serial.println("Connecting to Wi-Fi...");
-
-  WiFi.begin(
-    WIFI_SSID,
-    WIFI_PASSWORD
-  );
-
-  while (WiFi.status() != WL_CONNECTED) {
-
-    delay(500);
-
-    Serial.print(".");
-  }
-
-  Serial.println();
-  Serial.println("Wi-Fi connected!");
-
-  Serial.print("ESP32 IP: ");
-  Serial.println(WiFi.localIP());
-}
-
-// =====================================================
-// Buzzer
+// Helpers: non-blocking outputs
 // =====================================================
 
 void triggerBuzzer(unsigned long durationMs) {
-
   Serial.println();
   Serial.println("================================");
   Serial.println("BUZZER TRIGGERED");
   Serial.println("================================");
-
   Serial.print("Duration: ");
   Serial.print(durationMs);
   Serial.println(" ms");
 
-  digitalWrite(
-    BUZZER_PIN,
-    HIGH
-  );
-
+  digitalWrite(BUZZER_PIN, HIGH);
   buzzerActive = true;
-
-  buzzerStopTime =
-    millis() + durationMs;
+  buzzerStopTime = millis() + durationMs;
 }
 
-// -----------------------------------------------------
-// Silence buzzer
-// -----------------------------------------------------
-
 void silenceBuzzer() {
-
   Serial.println();
   Serial.println("================================");
   Serial.println("BUZZER SILENCED");
   Serial.println("================================");
 
-  digitalWrite(
-    BUZZER_PIN,
-    LOW
-  );
-
+  digitalWrite(BUZZER_PIN, LOW);
   buzzerActive = false;
-
   buzzerStopTime = 0;
 }
 
-// -----------------------------------------------------
-// Update timed buzzer
-// -----------------------------------------------------
-
 void updateBuzzer() {
-
-  if (!buzzerActive) {
-    return;
-  }
-
+  if (!buzzerActive) return;
   if (millis() >= buzzerStopTime) {
-
-    digitalWrite(
-      BUZZER_PIN,
-      LOW
-    );
-
+    digitalWrite(BUZZER_PIN, LOW);
     buzzerActive = false;
-
     buzzerStopTime = 0;
-
-    Serial.println(
-      "Buzzer duration completed."
-    );
+    Serial.println("Buzzer duration completed.");
   }
 }
 
-// =====================================================
-// Check fingerprint sensor
-// =====================================================
+void triggerGreenLED(unsigned long durationMs = LED_FEEDBACK_MS) {
+  digitalWrite(LED_PIN, HIGH);
+  greenLedActive = true;
+  greenLedStopTime = millis() + durationMs;
+}
 
-void checkFingerprintSensor() {
+void triggerRedLED(unsigned long durationMs = LED_FEEDBACK_MS) {
+  digitalWrite(RED_LED_PIN, HIGH);
+  redLedActive = true;
+  redLedStopTime = millis() + durationMs;
+}
 
-  Serial.println();
-  Serial.println("Checking fingerprint sensor...");
-
-  if (finger.verifyPassword()) {
-
-    fingerprintConnected = true;
-
-    Serial.println(
-      "Fingerprint sensor connected!"
-    );
-
-    if (
-      finger.getTemplateCount()
-      == FINGERPRINT_OK
-    ) {
-
-      fingerprintTemplateCount =
-        finger.templateCount;
-
-      Serial.print(
-        "Stored fingerprints: "
-      );
-
-      Serial.println(
-        fingerprintTemplateCount
-      );
-
-    } else {
-
-      Serial.println(
-        "Could not read fingerprint template count."
-      );
-    }
-
-  } else {
-
-    fingerprintConnected = false;
-
-    fingerprintTemplateCount = 0;
-
-    Serial.println(
-      "Fingerprint sensor NOT detected."
-    );
+void updateLEDs() {
+  if (greenLedActive && millis() >= greenLedStopTime) {
+    digitalWrite(LED_PIN, LOW);
+    greenLedActive = false;
+    greenLedStopTime = 0;
+  }
+  if (redLedActive && millis() >= redLedStopTime) {
+    digitalWrite(RED_LED_PIN, LOW);
+    redLedActive = false;
+    redLedStopTime = 0;
   }
 }
 
+// Call once per loop — keeps all timed outputs honest
+void updateOutputs() {
+  updateBuzzer();
+  updateLEDs();
+}
+
 // =====================================================
-// Send device heartbeat/status
-// =====================================================
-//
-// IMPORTANT:
-//
-// The ESP32 does NOT send:
-//   - status
-//   - lastSeen
-//
-// The Next.js API updates lastSeen automatically
-// whenever this request is received.
-//
-// Heartbeat is sent every 30 seconds.
-//
-// Server logic:
-//
-// Date.now() - lastSeen < 60000
-//     => ONLINE
-//
-// Date.now() - lastSeen >= 60000
-//     => OFFLINE
-//
+// PIR motion
 // =====================================================
 
-void sendDeviceStatus() {
-
+void reportMotion() {
   if (WiFi.status() != WL_CONNECTED) {
-
-    Serial.println(
-      "Wi-Fi disconnected. Heartbeat not sent."
-    );
-
+    Serial.println("Motion: Wi-Fi not connected, skip report");
     return;
   }
 
   HTTPClient http;
+  http.setTimeout(4000);
+  http.begin(MOTION_API);
+  http.addHeader("Content-Type", "application/json");
 
+  String body = String("{\"esp32Id\":\"") + ESP32_ID + "\"}";
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("PIR MOTION DETECTED — reporting");
+  Serial.println("================================");
+
+  int code = http.POST(body);
+
+  if (code > 0) {
+    String response = http.getString();
+    Serial.print("Motion API response (");
+    Serial.print(code);
+    Serial.print("): ");
+    Serial.println(response);
+
+    if (response.indexOf("\"triggerBuzzer\":true") >= 0 ||
+        response.indexOf("\"afterHours\":true") >= 0) {
+      Serial.println("AFTER HOURS → stored + sounding buzzer");
+      triggerBuzzer(MOTION_ALARM_BUZZER_MS);
+    } else if (response.indexOf("\"recorded\":false") >= 0) {
+      Serial.println("Working hours → motion ignored (not stored)");
+    }
+  } else {
+    Serial.print("Motion API failed, HTTP code: ");
+    Serial.println(code);
+  }
+
+  http.end();
+}
+
+void checkPIR() {
+  if (!pirReady) {
+    return;  // still warming up / settling — ignore edges
+  }
+
+  bool current = digitalRead(PIR_PIN) == HIGH;
+
+  // Rising edge = new motion detection
+  if (current && !lastPirState) {
+    unsigned long now = millis();
+    if (now - lastMotionReport >= MOTION_COOLDOWN_MS) {
+      lastMotionReport = now;
+      reportMotion();
+    } else {
+      Serial.println("PIR rising edge ignored (cooldown)");
+    }
+  }
+
+  lastPirState = current;
+}
+
+// =====================================================
+// Wi-Fi
+// =====================================================
+
+void connectWiFi() {
+  Serial.println();
+  Serial.println("Connecting to Wi-Fi...");
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println();
+  Serial.println("Wi-Fi connected!");
+  Serial.print("ESP32 IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+// =====================================================
+// Fingerprint sensor check
+// =====================================================
+
+void checkFingerprintSensor() {
+  Serial.println();
+  Serial.println("Checking fingerprint sensor...");
+
+  if (finger.verifyPassword()) {
+    fingerprintConnected = true;
+    Serial.println("Fingerprint sensor connected!");
+
+    if (finger.getTemplateCount() == FINGERPRINT_OK) {
+      fingerprintTemplateCount = finger.templateCount;
+      Serial.print("Stored fingerprints: ");
+      Serial.println(fingerprintTemplateCount);
+    } else {
+      Serial.println("Could not read fingerprint template count.");
+    }
+  } else {
+    fingerprintConnected = false;
+    fingerprintTemplateCount = 0;
+    Serial.println("Fingerprint sensor NOT detected.");
+  }
+}
+
+// =====================================================
+// Heartbeat
+// =====================================================
+
+void sendDeviceStatus() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Wi-Fi disconnected. Heartbeat not sent.");
+    return;
+  }
+
+  HTTPClient http;
+  http.setTimeout(4000);
   http.begin(STATUS_API);
+  http.addHeader("Content-Type", "application/json");
 
-  http.addHeader(
-    "Content-Type",
-    "application/json"
-  );
+  bool ledActive = digitalRead(LED_PIN) == HIGH;
 
-  // Read current hardware state
-  bool ledActive =
-    digitalRead(LED_PIN);
-
-  // Build JSON
   String json = "{";
-
   json += "\"esp32Id\":\"";
   json += ESP32_ID;
   json += "\",";
-
   json += "\"firmware\":\"";
   json += FIRMWARE_VERSION;
   json += "\",";
-
   json += "\"fingerprintConnected\":";
-  json += fingerprintConnected
-    ? "true"
-    : "false";
-
+  json += fingerprintConnected ? "true" : "false";
   json += ",";
-
   json += "\"fingerprintTemplateCount\":";
   json += fingerprintTemplateCount;
-
   json += ",";
-
   json += "\"ledActive\":";
-  json += ledActive
-    ? "true"
-    : "false";
-
+  json += ledActive ? "true" : "false";
   json += ",";
-
   json += "\"buzzerActive\":";
-  json += buzzerActive
-    ? "true"
-    : "false";
-
+  json += buzzerActive ? "true" : "false";
   json += "}";
 
   Serial.println();
   Serial.println("================================");
   Serial.println("SENDING DEVICE HEARTBEAT");
   Serial.println("================================");
-
   Serial.println(json);
 
-  int responseCode =
-    http.POST(json);
-
-  Serial.print(
-    "HTTP response code: "
-  );
-
-  Serial.println(
-    responseCode
-  );
-
-  String response =
-    http.getString();
-
-  Serial.println(
-    "Server response:"
-  );
-
-  Serial.println(response);
-
+  int responseCode = http.POST(json);
+  Serial.print("HTTP response code: ");
+  Serial.println(responseCode);
+  Serial.println(http.getString());
   http.end();
 }
 
 // =====================================================
-// Send fingerprint event
+// Fingerprint event → server
 // =====================================================
 
-// Returns true only if the SERVER granted access. The sensor
-// may recognise a print, but the server has the final say
-// (inactive / archived users are denied). If the server can't
-// be reached we fail closed (deny).
-bool sendFingerprintEvent(
-  int fingerprintId,
-  const char* result
-) {
-
+bool sendFingerprintEvent(int fingerprintId, const char* result) {
   if (WiFi.status() != WL_CONNECTED) {
-
-    Serial.println(
-      "Wi-Fi disconnected."
-    );
-
-    Serial.println(
-      "Fingerprint event not sent."
-    );
-
+    Serial.println("Wi-Fi disconnected. Fingerprint event not sent.");
     return false;
   }
 
   HTTPClient http;
-
+  http.setTimeout(4000);
   http.begin(FINGERPRINT_API);
-
-  http.addHeader(
-    "Content-Type",
-    "application/json"
-  );
+  http.addHeader("Content-Type", "application/json");
 
   String json = "{";
-
   json += "\"esp32Id\":\"";
   json += ESP32_ID;
   json += "\",";
-
   json += "\"fingerprintId\":";
   json += fingerprintId;
-
   json += ",";
-
   json += "\"result\":\"";
   json += result;
   json += "\"";
-
   json += "}";
 
   Serial.println();
   Serial.println("================================");
   Serial.println("SENDING FINGERPRINT EVENT");
   Serial.println("================================");
-
   Serial.println(json);
 
-  int responseCode =
-    http.POST(json);
+  int responseCode = http.POST(json);
+  Serial.print("Fingerprint API response: ");
+  Serial.println(responseCode);
 
-  Serial.print(
-    "Fingerprint API response: "
-  );
-
-  Serial.println(
-    responseCode
-  );
-
-  String response =
-    http.getString();
-
-  Serial.println(
-    "Server response:"
-  );
-
+  String response = http.getString();
   Serial.println(response);
-
   http.end();
 
   if (responseCode != 200) {
@@ -440,307 +396,131 @@ bool sendFingerprintEvent(
   }
 
   JsonDocument responseDoc;
-
-  if (
-    deserializeJson(
-      responseDoc,
-      response
-    )
-  ) {
+  if (deserializeJson(responseDoc, response)) {
     return false;
   }
 
-  const char* serverStatus =
-    responseDoc["status"] | "DENIED";
-
-  const char* direction =
-    responseDoc["direction"] | "";
-
+  const char* serverStatus = responseDoc["status"] | "DENIED";
+  const char* direction = responseDoc["direction"] | "";
   if (strlen(direction) > 0) {
-
     Serial.print("Direction: ");
     Serial.println(direction);
   }
 
-  return strcmp(
-    serverStatus,
-    "GRANTED"
-  ) == 0;
+  return strcmp(serverStatus, "GRANTED") == 0;
 }
 
 // =====================================================
-// Enroll fingerprint
+// Enroll / delete (blocking by nature of sensor UX)
 // =====================================================
 
-bool enrollFingerprint(
-  uint16_t fingerprintId
-) {
-
+bool enrollFingerprint(uint16_t fingerprintId) {
   Serial.println();
   Serial.println("================================");
   Serial.println("FINGERPRINT ENROLLMENT");
   Serial.println("================================");
-
-  Serial.print(
-    "Fingerprint ID: "
-  );
-
-  Serial.println(
-    fingerprintId
-  );
-
-  // ---------------------------------------------------
-  // First scan
-  // ---------------------------------------------------
+  Serial.print("Fingerprint ID: ");
+  Serial.println(fingerprintId);
 
   Serial.println();
-  Serial.println(
-    "Place finger on sensor..."
-  );
+  Serial.println("Place finger on sensor...");
 
   while (true) {
-
-    uint8_t result =
-      finger.getImage();
-
+    updateOutputs();  // keep buzzer/LEDs alive during wait
+    uint8_t result = finger.getImage();
     if (result == FINGERPRINT_OK) {
-
-      Serial.println(
-        "First fingerprint image captured."
-      );
-
+      Serial.println("First fingerprint image captured.");
       break;
     }
-
-    if (
-      result != FINGERPRINT_NOFINGER
-    ) {
-
-      Serial.print(
-        "Error capturing first fingerprint: "
-      );
-
+    if (result != FINGERPRINT_NOFINGER) {
+      Serial.print("Error capturing first fingerprint: ");
       Serial.println(result);
-
       return false;
     }
-
-    delay(100);
+    delay(50);
   }
 
-  // ---------------------------------------------------
-  // Convert first image
-  // ---------------------------------------------------
-
-  uint8_t result =
-    finger.image2Tz(1);
-
-  if (result != FINGERPRINT_OK) {
-
-    Serial.println(
-      "Could not convert first fingerprint."
-    );
-
+  if (finger.image2Tz(1) != FINGERPRINT_OK) {
+    Serial.println("Could not convert first fingerprint.");
     return false;
   }
-
-  Serial.println(
-    "First fingerprint converted."
-  );
-
-  // ---------------------------------------------------
-  // Remove finger
-  // ---------------------------------------------------
+  Serial.println("First fingerprint converted.");
 
   Serial.println();
-  Serial.println(
-    "Remove finger..."
-  );
-
-  delay(1000);
-
-  while (
-    finger.getImage()
-    != FINGERPRINT_NOFINGER
-  ) {
-
-    delay(100);
+  Serial.println("Remove finger...");
+  delay(500);
+  while (finger.getImage() != FINGERPRINT_NOFINGER) {
+    updateOutputs();
+    delay(50);
   }
-
-  Serial.println(
-    "Finger removed."
-  );
-
-  // ---------------------------------------------------
-  // Second scan
-  // ---------------------------------------------------
+  Serial.println("Finger removed.");
 
   Serial.println();
-  Serial.println(
-    "Place the SAME finger again..."
-  );
+  Serial.println("Place the SAME finger again...");
 
   while (true) {
-
-    result =
-      finger.getImage();
-
+    updateOutputs();
+    uint8_t result = finger.getImage();
     if (result == FINGERPRINT_OK) {
-
-      Serial.println(
-        "Second fingerprint image captured."
-      );
-
+      Serial.println("Second fingerprint image captured.");
       break;
     }
-
-    if (
-      result != FINGERPRINT_NOFINGER
-    ) {
-
-      Serial.print(
-        "Error capturing second fingerprint: "
-      );
-
+    if (result != FINGERPRINT_NOFINGER) {
+      Serial.print("Error capturing second fingerprint: ");
       Serial.println(result);
-
       return false;
     }
-
-    delay(100);
+    delay(50);
   }
 
-  // ---------------------------------------------------
-  // Convert second image
-  // ---------------------------------------------------
-
-  result =
-    finger.image2Tz(2);
-
-  if (result != FINGERPRINT_OK) {
-
-    Serial.println(
-      "Could not convert second fingerprint."
-    );
-
+  if (finger.image2Tz(2) != FINGERPRINT_OK) {
+    Serial.println("Could not convert second fingerprint.");
     return false;
   }
-
-  Serial.println(
-    "Second fingerprint converted."
-  );
-
-  // ---------------------------------------------------
-  // Create model
-  // ---------------------------------------------------
+  Serial.println("Second fingerprint converted.");
 
   Serial.println();
-  Serial.println(
-    "Creating fingerprint model..."
-  );
-
-  result =
-    finger.createModel();
-
-  if (result != FINGERPRINT_OK) {
-
-    Serial.println(
-      "Fingerprints did not match."
-    );
-
+  Serial.println("Creating fingerprint model...");
+  if (finger.createModel() != FINGERPRINT_OK) {
+    Serial.println("Fingerprints did not match.");
     return false;
   }
+  Serial.println("Fingerprint model created successfully.");
 
-  Serial.println(
-    "Fingerprint model created successfully."
-  );
+  Serial.print("Storing fingerprint as ID ");
+  Serial.println(fingerprintId);
 
-  // ---------------------------------------------------
-  // Store model
-  // ---------------------------------------------------
-
-  Serial.print(
-    "Storing fingerprint as ID "
-  );
-
-  Serial.println(
-    fingerprintId
-  );
-
-  result =
-    finger.storeModel(
-      fingerprintId
-    );
-
-  if (result != FINGERPRINT_OK) {
-
-    Serial.println(
-      "Failed to store fingerprint."
-    );
-
+  if (finger.storeModel(fingerprintId) != FINGERPRINT_OK) {
+    Serial.println("Failed to store fingerprint.");
     return false;
   }
 
   Serial.println();
-  Serial.println(
-    "Fingerprint stored successfully!"
-  );
-
+  Serial.println("Fingerprint stored successfully!");
   return true;
 }
 
-// =====================================================
-// Delete fingerprint
-// =====================================================
-
-bool deleteFingerprint(
-  uint16_t fingerprintId
-) {
-
+bool deleteFingerprint(uint16_t fingerprintId) {
   Serial.println();
   Serial.println("================================");
   Serial.println("FINGERPRINT DELETION");
   Serial.println("================================");
+  Serial.print("Deleting fingerprint ID: ");
+  Serial.println(fingerprintId);
 
-  Serial.print(
-    "Deleting fingerprint ID: "
-  );
-
-  Serial.println(
-    fingerprintId
-  );
-
-  uint8_t result =
-    finger.deleteModel(
-      fingerprintId
-    );
-
+  uint8_t result = finger.deleteModel(fingerprintId);
   if (result == FINGERPRINT_OK) {
-
-    Serial.println(
-      "Fingerprint deleted successfully."
-    );
-
+    Serial.println("Fingerprint deleted successfully.");
     return true;
   }
 
-  Serial.print(
-    "Failed to delete fingerprint."
-  );
-
-  Serial.print(
-    " Error code: "
-  );
-
-  Serial.println(
-    result
-  );
-
+  Serial.print("Failed to delete fingerprint. Error code: ");
+  Serial.println(result);
   return false;
 }
 
 // =====================================================
-// Send command result
+// Command result + pending commands
 // =====================================================
 
 void sendCommandResult(
@@ -748,599 +528,248 @@ void sendCommandResult(
   bool success,
   const char* failureReason = nullptr
 ) {
-
   if (WiFi.status() != WL_CONNECTED) {
-
-    Serial.println(
-      "Wi-Fi disconnected."
-    );
-
-    Serial.println(
-      "Command result not sent."
-    );
-
+    Serial.println("Wi-Fi disconnected. Command result not sent.");
     return;
   }
 
   HTTPClient http;
-
-  http.begin(
-    COMMAND_RESULT_API
-  );
-
-  http.addHeader(
-    "Content-Type",
-    "application/json"
-  );
+  http.setTimeout(4000);
+  http.begin(COMMAND_RESULT_API);
+  http.addHeader("Content-Type", "application/json");
 
   String json = "{";
-
   json += "\"commandId\":\"";
   json += commandId;
   json += "\",";
-
   json += "\"success\":";
-  json += success
-    ? "true"
-    : "false";
+  json += success ? "true" : "false";
 
-  if (
-    !success &&
-    failureReason != nullptr
-  ) {
-
-    json += ",";
-
-    json += "\"failureReason\":\"";
+  if (!success && failureReason != nullptr) {
+    json += ",\"failureReason\":\"";
     json += failureReason;
     json += "\"";
   }
-
   json += "}";
 
   Serial.println();
   Serial.println("================================");
   Serial.println("SENDING COMMAND RESULT");
   Serial.println("================================");
-
   Serial.println(json);
 
-  int responseCode =
-    http.POST(json);
-
-  Serial.print(
-    "Command result response: "
-  );
-
-  Serial.println(
-    responseCode
-  );
-
-  String response =
-    http.getString();
-
-  Serial.println(
-    "Server response:"
-  );
-
-  Serial.println(response);
-
+  int responseCode = http.POST(json);
+  Serial.print("Command result response: ");
+  Serial.println(responseCode);
+  Serial.println(http.getString());
   http.end();
 }
 
-// =====================================================
-// Check for pending commands
-// =====================================================
-
 void checkForCommands() {
-
-  // Don't process commands while enrolling
-  if (enrollmentRunning) {
-    return;
-  }
-
-  // Need Wi-Fi
-  if (
-    WiFi.status() != WL_CONNECTED
-  ) {
-    return;
-  }
+  if (enrollmentRunning) return;
+  if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
+  http.setTimeout(5000);
+  http.begin(COMMAND_API);
 
-  http.begin(
-    COMMAND_API
-  );
+  int responseCode = http.GET();
 
-  int responseCode =
-    http.GET();
-
-  Serial.print(
-    "Command API response: "
-  );
-
-  Serial.println(
-    responseCode
-  );
+  // -11 = HTTPC_ERROR_READ_TIMEOUT — often Wi-Fi blip or server busy.
+  // Not fatal; we try again on the next 3 s poll.
+  if (responseCode <= 0) {
+    Serial.print("Command poll failed (HTTP ");
+    Serial.print(responseCode);
+    Serial.println(") — will retry");
+    http.end();
+    return;
+  }
 
   if (responseCode != 200) {
-
+    Serial.print("Command API unexpected status: ");
+    Serial.println(responseCode);
     http.end();
-
     return;
   }
 
-  String response =
-    http.getString();
-
+  String response = http.getString();
   http.end();
 
-  // ---------------------------------------------------
-  // Parse JSON
-  // ---------------------------------------------------
+  // No pending command → stay quiet (avoid Serial spam every 3 s)
+  if (response.indexOf(""command":null") >= 0 ||
+      response.indexOf(""command": null") >= 0) {
+    return;
+  }
 
   JsonDocument doc;
-
-  DeserializationError error =
-    deserializeJson(
-      doc,
-      response
-    );
-
+  DeserializationError error = deserializeJson(doc, response);
   if (error) {
-
-    Serial.print(
-      "Command JSON parsing failed: "
-    );
-
-    Serial.println(
-      error.c_str()
-    );
-
+    Serial.print("Command JSON parsing failed: ");
+    Serial.println(error.c_str());
     return;
   }
 
-  // ---------------------------------------------------
-  // Check command
-  // ---------------------------------------------------
-
-  if (
-    doc["command"].isNull() ||
-    doc["command"]["commandId"].isNull()
-  ) {
-
+  if (doc["command"].isNull() || doc["command"]["commandId"].isNull()) {
     return;
   }
 
-  // ---------------------------------------------------
-  // Read command
-  // ---------------------------------------------------
-
-  const char* command =
-    doc["command"]["command"];
-
-  const char* commandId =
-    doc["command"]["commandId"];
-
-  int fingerprintId =
-    doc["command"]["fingerprintId"] | 0;
-
-  unsigned long durationMs =
-    doc["command"]["durationMs"] | 2000;
+  const char* command = doc["command"]["command"];
+  const char* commandId = doc["command"]["commandId"];
+  int fingerprintId = doc["command"]["fingerprintId"] | 0;
+  unsigned long durationMs = doc["command"]["durationMs"] | BUZZER_FEEDBACK_MS;
 
   Serial.println();
   Serial.println("================================");
   Serial.println("PENDING DEVICE COMMAND");
   Serial.println("================================");
-
   Serial.print("Command: ");
   Serial.println(command);
-
   Serial.print("Command ID: ");
   Serial.println(commandId);
-
   Serial.print("Fingerprint ID: ");
   Serial.println(fingerprintId);
-
   Serial.print("Duration: ");
   Serial.print(durationMs);
   Serial.println(" ms");
 
-  // ===================================================
-  // TRIGGER BUZZER
-  // ===================================================
-
-  if (
-    strcmp(
-      command,
-      "TRIGGER_BUZZER"
-    ) == 0
-  ) {
-
-    if (durationMs == 0) {
-      durationMs = 2000;
-    }
-
-    triggerBuzzer(
-      durationMs
-    );
-
-    sendCommandResult(
-      commandId,
-      true
-    );
-
-    // This also updates lastSeen
+  if (strcmp(command, "TRIGGER_BUZZER") == 0) {
+    if (durationMs == 0) durationMs = BUZZER_FEEDBACK_MS;
+    triggerBuzzer(durationMs);
+    sendCommandResult(commandId, true);
     sendDeviceStatus();
-
     return;
   }
 
-  // ===================================================
-  // SILENCE BUZZER
-  // ===================================================
-
-  else if (
-    strcmp(
-      command,
-      "SILENCE_BUZZER"
-    ) == 0
-  ) {
-
+  if (strcmp(command, "SILENCE_BUZZER") == 0) {
     silenceBuzzer();
-
-    sendCommandResult(
-      commandId,
-      true
-    );
-
-    // This also updates lastSeen
+    sendCommandResult(commandId, true);
     sendDeviceStatus();
-
     return;
   }
 
-  // ===================================================
-  // ENROLL FINGERPRINT
-  // ===================================================
-
-  else if (
-    strcmp(
-      command,
-      "ENROLL_FINGERPRINT"
-    ) == 0
-  ) {
-
-    if (
-      fingerprintId < 1 ||
-      fingerprintId > 127
-    ) {
-
-      Serial.println(
-        "Invalid fingerprint ID."
-      );
-
+  if (strcmp(command, "ENROLL_FINGERPRINT") == 0) {
+    if (fingerprintId < 1 || fingerprintId > 127) {
       sendCommandResult(
         commandId,
         false,
         "Fingerprint ID must be between 1 and 127"
       );
-
       return;
     }
 
     enrollmentRunning = true;
-
-    bool enrolled =
-      enrollFingerprint(
-        fingerprintId
-      );
-
+    bool enrolled = enrollFingerprint(fingerprintId);
     enrollmentRunning = false;
 
     if (enrolled) {
-
-      Serial.println();
-      Serial.println(
-        "Enrollment completed successfully."
-      );
-
-      // Update local template count
-      if (
-        finger.getTemplateCount()
-        == FINGERPRINT_OK
-      ) {
-
-        fingerprintTemplateCount =
-          finger.templateCount;
+      if (finger.getTemplateCount() == FINGERPRINT_OK) {
+        fingerprintTemplateCount = finger.templateCount;
       }
-
-      // Tell server enrollment succeeded
-      sendCommandResult(
-        commandId,
-        true
-      );
-
-      // Update server heartbeat
+      sendCommandResult(commandId, true);
       sendDeviceStatus();
-
     } else {
-
-      Serial.println();
-      Serial.println(
-        "Enrollment failed."
-      );
-
       sendCommandResult(
         commandId,
         false,
         "AS608 fingerprint enrollment failed"
       );
     }
-
     return;
   }
 
-  // ===================================================
-  // DELETE FINGERPRINT
-  // ===================================================
-
-  else if (
-    strcmp(
-      command,
-      "DELETE_FINGERPRINT"
-    ) == 0
-  ) {
-
-    if (
-      fingerprintId < 1 ||
-      fingerprintId > 127
-    ) {
-
-      Serial.println(
-        "Invalid fingerprint ID."
-      );
-
+  if (strcmp(command, "DELETE_FINGERPRINT") == 0) {
+    if (fingerprintId < 1 || fingerprintId > 127) {
       sendCommandResult(
         commandId,
         false,
         "Fingerprint ID must be between 1 and 127"
       );
-
       return;
     }
 
-    bool deleted =
-      deleteFingerprint(
-        fingerprintId
-      );
-
+    bool deleted = deleteFingerprint(fingerprintId);
     if (deleted) {
-
-      // Update local template count
-      if (
-        finger.getTemplateCount()
-        == FINGERPRINT_OK
-      ) {
-
-        fingerprintTemplateCount =
-          finger.templateCount;
+      if (finger.getTemplateCount() == FINGERPRINT_OK) {
+        fingerprintTemplateCount = finger.templateCount;
       }
-
-      Serial.println();
-      Serial.println(
-        "Deletion completed successfully."
-      );
-
-      sendCommandResult(
-        commandId,
-        true
-      );
-
-      // Update server heartbeat
+      sendCommandResult(commandId, true);
       sendDeviceStatus();
-
     } else {
-
-      Serial.println();
-      Serial.println(
-        "Fingerprint deletion failed."
-      );
-
       sendCommandResult(
         commandId,
         false,
         "Failed to delete fingerprint from sensor"
       );
     }
-
     return;
   }
 
-  // ===================================================
-  // Unknown command
-  // ===================================================
-
-  Serial.println(
-    "Unknown device command."
-  );
-
-  sendCommandResult(
-    commandId,
-    false,
-    "Unknown device command"
-  );
+  Serial.println("Unknown device command.");
+  sendCommandResult(commandId, false, "Unknown device command");
 }
 
 // =====================================================
-// Scan fingerprint
+// Scan fingerprint (non-blocking LED/buzzer feedback)
 // =====================================================
 
 void scanFingerprint() {
+  if (enrollmentRunning) return;
+  if (!fingerprintConnected) return;
 
-  // Don't scan while enrollment is happening
-  if (enrollmentRunning) {
+  uint8_t result = finger.getImage();
+
+  if (result == FINGERPRINT_NOFINGER) {
     return;
   }
 
-  // Don't scan if sensor isn't connected
-  if (!fingerprintConnected) {
-    return;
-  }
-
-  // ---------------------------------------------------
-  // Capture image
-  // ---------------------------------------------------
-
-  uint8_t result =
-    finger.getImage();
-
-  if (
-    result == FINGERPRINT_NOFINGER
-  ) {
-    return;
-  }
-
-  if (
-    result != FINGERPRINT_OK
-  ) {
-
-    Serial.println(
-      "Could not capture fingerprint image."
-    );
-
+  // Transient AS608 codes (partial finger, bad image, packet glitch)
+  // are normal while scanning — do not spam Serial.
+  if (result != FINGERPRINT_OK) {
     return;
   }
 
   Serial.println();
-  Serial.println(
-    "Fingerprint image captured."
-  );
+  Serial.println("Fingerprint image captured.");
 
-  // ---------------------------------------------------
-  // Convert image
-  // ---------------------------------------------------
-
-  result =
-    finger.image2Tz();
-
-  if (
-    result != FINGERPRINT_OK
-  ) {
-
-    Serial.println(
-      "Could not convert fingerprint."
-    );
-
-    sendFingerprintEvent(
-      0,
-      "DENIED"
-    );
-
+  result = finger.image2Tz();
+  if (result != FINGERPRINT_OK) {
+    Serial.println("Could not convert fingerprint.");
+    sendFingerprintEvent(0, "DENIED");
+    triggerBuzzer(BUZZER_FEEDBACK_MS);
+    triggerRedLED();
     return;
   }
 
-  // ---------------------------------------------------
-  // Search database
-  // ---------------------------------------------------
+  result = finger.fingerSearch();
 
-  result =
-    finger.fingerSearch();
+  if (result == FINGERPRINT_OK) {
+    Serial.println("Fingerprint recognized!");
+    Serial.print("Fingerprint ID: ");
+    Serial.println(finger.fingerID);
+    Serial.print("Confidence: ");
+    Serial.println(finger.confidence);
 
-  if (
-    result == FINGERPRINT_OK
-  ) {
-
-    Serial.println(
-      "Fingerprint recognized!"
-    );
-
-    Serial.print(
-      "Fingerprint ID: "
-    );
-
-    Serial.println(
-      finger.fingerID
-    );
-
-    Serial.print(
-      "Confidence: "
-    );
-
-    Serial.println(
-      finger.confidence
-    );
-
-    // -------------------------------------------------
-    // GRANTED
-    // -------------------------------------------------
-
-    bool granted =
-      sendFingerprintEvent(
-        finger.fingerID,
-        "GRANTED"
-      );
+    bool granted = sendFingerprintEvent(finger.fingerID, "GRANTED");
 
     if (granted) {
-
-      // Turn LED on
-      digitalWrite(
-        LED_PIN,
-        HIGH
-      );
-
-      delay(2000);
-
-      // Turn LED off
-      digitalWrite(
-        LED_PIN,
-        LOW
-      );
-
+      // Non-blocking green LED — loop keeps running (PIR, buzzer, etc.)
+      triggerGreenLED(LED_FEEDBACK_MS);
     } else {
-
-      // Recognised print, but the server refused
-      // (inactive or archived user)
-      Serial.println(
-        "Access denied by server."
-      );
-
-      triggerBuzzer(
-        1000
-      );
+      Serial.println("Access denied by server.");
+      triggerBuzzer(BUZZER_FEEDBACK_MS);
+      triggerRedLED();
     }
-
   } else {
-
-    // -------------------------------------------------
-    // DENIED
-    // -------------------------------------------------
-
-    Serial.println(
-      "Fingerprint NOT recognized."
-    );
-
-    sendFingerprintEvent(
-      0,
-      "DENIED"
-    );
-
-    // Activate buzzer
-    triggerBuzzer(
-      1000
-    );
+    Serial.println("Fingerprint NOT recognized.");
+    sendFingerprintEvent(0, "DENIED");
+    triggerBuzzer(BUZZER_FEEDBACK_MS);
+    triggerRedLED();
   }
 
-  // ---------------------------------------------------
-  // Wait for finger removal
-  // ---------------------------------------------------
-
-  while (
-    finger.getImage()
-    != FINGERPRINT_NOFINGER
-  ) {
-
-    delay(100);
+  // Wait for finger removal without freezing outputs for long stretches
+  while (finger.getImage() != FINGERPRINT_NOFINGER) {
+    updateOutputs();
+    delay(30);
   }
 }
 
@@ -1349,152 +778,169 @@ void scanFingerprint() {
 // =====================================================
 
 void setup() {
+  Serial.begin(115200);
+  delay(500);
 
-  Serial.begin(
-    115200
-  );
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
-  delay(1000);
+  pinMode(RED_LED_PIN, OUTPUT);
+  digitalWrite(RED_LED_PIN, LOW);
 
-  // ===================================================
-  // LED
-  // ===================================================
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
 
-  pinMode(
-    LED_PIN,
-    OUTPUT
-  );
+  pinMode(PIR_PIN, INPUT);
+  lastPirState = digitalRead(PIR_PIN) == HIGH;
+  pirReady = false;
 
-  digitalWrite(
-    LED_PIN,
-    LOW
-  );
-
-  // ===================================================
-  // Buzzer
-  // ===================================================
-
-  pinMode(
-    BUZZER_PIN,
-    OUTPUT
-  );
-
-  digitalWrite(
-    BUZZER_PIN,
-    LOW
-  );
-
-  // ===================================================
-  // AS608
-  // ===================================================
-
-  fingerSerial.begin(
-    57600,
-    SERIAL_8N1,
-    FINGER_RX,
-    FINGER_TX
-  );
-
-  // ===================================================
-  // Startup message
-  // ===================================================
+  fingerSerial.begin(57600, SERIAL_8N1, FINGER_RX, FINGER_TX);
 
   Serial.println();
   Serial.println("==============================");
   Serial.println(" Smart Office Security System");
   Serial.println("==============================");
-
   Serial.print("ESP32 ID: ");
   Serial.println(ESP32_ID);
-
   Serial.print("Firmware: ");
   Serial.println(FIRMWARE_VERSION);
 
-  // ===================================================
-  // Wi-Fi
-  // ===================================================
-
+  // -------------------------------------------------
+  // 1) ESP + Wi-Fi
+  // -------------------------------------------------
+  Serial.println();
+  Serial.println("[SELF-TEST] ESP32 starting...");
   connectWiFi();
+  Serial.println("[SELF-TEST] ESP32 + Wi-Fi: OK");
 
-  // ===================================================
-  // Fingerprint sensor
-  // ===================================================
-
+  // -------------------------------------------------
+  // 2) Fingerprint (AS608)
+  // -------------------------------------------------
+  Serial.println();
+  Serial.println("[SELF-TEST] Checking fingerprint sensor...");
   checkFingerprintSensor();
+  if (fingerprintConnected) {
+    Serial.println("[SELF-TEST] Fingerprint sensor: OK (connected)");
+  } else {
+    Serial.println("[SELF-TEST] Fingerprint sensor: NOT detected (will keep trying later)");
+  }
 
-  // ===================================================
-  // Initial heartbeat
-  // ===================================================
-  //
-  // This creates/updates lastSeen on the server.
-  //
-  // The ESP32 does NOT send status or lastSeen.
-  //
-  // ===================================================
+  // -------------------------------------------------
+  // 3) Buzzer / LEDs — quick hardware tick (non-blocking timers)
+  // -------------------------------------------------
+  Serial.println();
+  Serial.println("[SELF-TEST] Buzzer + LEDs pulse...");
+  triggerBuzzer(150);
+  triggerGreenLED(200);
+  triggerRedLED(200);
+  unsigned long pulseEnd = millis() + 250;
+  while (millis() < pulseEnd) {
+    updateOutputs();
+    delay(10);
+  }
+  silenceBuzzer();
+  digitalWrite(LED_PIN, LOW);
+  digitalWrite(RED_LED_PIN, LOW);
+  greenLedActive = false;
+  redLedActive = false;
+  Serial.println("[SELF-TEST] Buzzer + LEDs: OK");
 
+  // -------------------------------------------------
+  // 4) PIR warm-up (HC-SR501 needs ~30 s after power)
+  //    Do NOT send heartbeat or trust motion until settled.
+  // -------------------------------------------------
+  Serial.println();
+  Serial.println("[SELF-TEST] PIR warm-up starting...");
+  Serial.print("  Waiting ");
+  Serial.print(PIR_WARMUP_MS / 1000);
+  Serial.println(" s for sensor to stabilise (ignore false triggers).");
+
+  unsigned long warmStart = millis();
+  unsigned long lastPrint = 0;
+  while (millis() - warmStart < PIR_WARMUP_MS) {
+    updateOutputs();
+    // Progress every 5 s
+    if (millis() - lastPrint >= 5000) {
+      lastPrint = millis();
+      unsigned long left = (PIR_WARMUP_MS - (millis() - warmStart) + 999) / 1000;
+      Serial.print("  PIR warm-up... ");
+      Serial.print(left);
+      Serial.println(" s left");
+    }
+    delay(50);
+  }
+
+  Serial.println("  Warm-up time done. Waiting for PIR OUT to go LOW (settled)...");
+
+  unsigned long settleStart = millis();
+  bool settled = false;
+  while (millis() - settleStart < PIR_SETTLE_TIMEOUT_MS) {
+    updateOutputs();
+    if (digitalRead(PIR_PIN) == LOW) {
+      settled = true;
+      break;
+    }
+    delay(50);
+  }
+
+  if (settled) {
+    Serial.println("[SELF-TEST] PIR sensor: OK (settled / ready)");
+  } else {
+    // Still HIGH after timeout — start anyway but log warning
+    Serial.println("[SELF-TEST] PIR sensor: still HIGH after settle window — starting anyway");
+  }
+
+  lastPirState = digitalRead(PIR_PIN) == HIGH;
+  pirReady = true;
+  lastMotionReport = millis();  // avoid immediate false report after enable
+
+  // -------------------------------------------------
+  // 5) First heartbeat — only after self-test
+  // -------------------------------------------------
+  Serial.println();
+  Serial.println("[SELF-TEST] All checks finished → sending first heartbeat");
   sendDeviceStatus();
 
-  lastStatusTime =
-    millis();
+  lastStatusTime = millis();
+  lastCommandCheck = millis();
+
+  Serial.println();
+  Serial.println("==============================");
+  Serial.println(" System ready — entering loop");
+  Serial.println("==============================");
 }
 
 // =====================================================
-// LOOP
+// LOOP — keep this tight; no long delay() calls here
 // =====================================================
 
 void loop() {
+  // 1. Timed outputs first (buzzer + LEDs)
+  updateOutputs();
 
-  // ===================================================
-  // Update buzzer
-  // ===================================================
-
-  updateBuzzer();
-
-  // ===================================================
-  // Check pending commands every 3 seconds
-  // ===================================================
-
-  if (
-    millis() - lastCommandCheck
-    >= COMMAND_INTERVAL
-  ) {
-
-    lastCommandCheck =
-      millis();
-
+  // 2. Commands (every 3 s)
+  if (millis() - lastCommandCheck >= COMMAND_INTERVAL) {
+    lastCommandCheck = millis();
     checkForCommands();
   }
 
-  // ===================================================
-  // Scan fingerprint
-  // ===================================================
-
+  // 3. Fingerprint scan (returns immediately if no finger)
   scanFingerprint();
 
-  // ===================================================
-  // Heartbeat every 30 seconds
-  // ===================================================
-  //
-  // Every 30 seconds:
-  //
-  // 1. Check AS608
-  // 2. Send current hardware information
-  // 3. Server updates lastSeen
-  //
-  // ===================================================
+  // 4. PIR (instant GPIO read; HTTP only on rising edge + cooldown)
+  checkPIR();
 
-  if (
-    millis() - lastStatusTime
-    >= STATUS_INTERVAL
-  ) {
-
-    lastStatusTime =
-      millis();
-
-    checkFingerprintSensor();
-
+  // 5. Heartbeat (every 30 s). Re-check AS608 only every N cycles
+  //    so we don't block on verifyPassword every time.
+  if (millis() - lastStatusTime >= STATUS_INTERVAL) {
+    lastStatusTime = millis();
+    statusCycleCount++;
+    if (statusCycleCount >= SENSOR_RECHECK_EVERY_N) {
+      statusCycleCount = 0;
+      checkFingerprintSensor();
+    }
     sendDeviceStatus();
   }
 
-  delay(100);
+  delay(LOOP_IDLE_MS);
 }

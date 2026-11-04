@@ -105,4 +105,24 @@ export default defineSchema({
   })
     .index("by_device_status", ["deviceId", "status"])
     .index("by_esp32_status", ["esp32Id", "status"]),
+
+  // ── Working hours configuration (singleton, key = "default") ──────────────
+  // Weekday = Mon–Fri, Weekend = Sat–Sun. Times are "HH:mm" in CAT.
+  workingHoursSettings: defineTable({
+    key: v.literal("default"),
+    weekdayStart: v.string(), // e.g. "07:30"
+    weekdayEnd: v.string(), // e.g. "18:00"
+    weekendStart: v.string(), // e.g. "08:00"
+    weekendEnd: v.string(), // e.g. "12:00"
+  }).index("by_key", ["key"]),
+
+  // ── Per-date overrides (public holidays, extended days, etc.) ─────────────
+  // date is YYYY-MM-DD in CAT. closed=true → entire day is after-hours.
+  dateOverrides: defineTable({
+    date: v.string(), // "YYYY-MM-DD"
+    closed: v.boolean(),
+    start: v.optional(v.string()), // "HH:mm" when not closed
+    end: v.optional(v.string()),
+    label: v.optional(v.string()), // e.g. "Public Holiday", "Extended shift"
+  }).index("by_date", ["date"]),
 });

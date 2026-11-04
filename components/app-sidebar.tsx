@@ -41,7 +41,7 @@ const navItems = [
 ]
 
 const navSecondaryItems = [
-  { title: "Settings", url: "#", icon: <Settings2Icon className="size-4" /> },
+  { title: "Settings", url: "/dashboard/settings", icon: <Settings2Icon className="size-4" /> },
   { title: "Help",     url: "#", icon: <CircleHelpIcon className="size-4" /> },
 ]
 
